@@ -96,6 +96,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _voiceState = MutableStateFlow("IDLE")
     val voiceState: StateFlow<String> = _voiceState.asStateFlow()
 
+    val liveAudioLevel: StateFlow<Float> = conversationManager.liveAudioLevel
+    val liveErrorMessage: StateFlow<String?> = conversationManager.liveErrorMessage
+    val requestAudioPermissionEvent = MutableStateFlow(false)
+
     private val _isCameraOn = MutableStateFlow(true)
     val isCameraOn: StateFlow<Boolean> = _isCameraOn.asStateFlow()
 
@@ -341,6 +345,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun handleEndSession() {
         viewModelScope.launch {
+            conversationManager.stopLiveVoiceSession()
             _voiceState.value = "IDLE"
             conversationManager.endSession()
         }
@@ -351,23 +356,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             openApiKeyDialog()
             return
         }
+
+        if (!conversationManager.audioRecordManager.hasPermission()) {
+            requestAudioPermissionEvent.value = true
+            return
+        }
+
         viewModelScope.launch {
-            when (_voiceState.value) {
-                "IDLE" -> {
-                    _voiceState.value = "LISTENING"
-                    _lastInvisibleCorrection.value = null
-                    _safetyNotification.value = null
-                    // Simulated listening transition
-                    delay(3500)
-                    if (_voiceState.value == "LISTENING") {
-                        _voiceState.value = "THINKING"
-                        simulateSpeechAndPromptResponse()
-                    }
-                }
-                else -> {
+            if (_voiceState.value == "IDLE") {
+                startRealVoiceSession()
+            } else {
+                stopRealVoiceSession()
+            }
+        }
+    }
+
+    fun startRealVoiceSession() {
+        if (!geminiProvider.isKeyConfigured()) {
+            openApiKeyDialog()
+            return
+        }
+        if (!conversationManager.audioRecordManager.hasPermission()) {
+            requestAudioPermissionEvent.value = true
+            return
+        }
+
+        viewModelScope.launch {
+            _lastInvisibleCorrection.value = null
+            _safetyNotification.value = null
+            val personality = appSettings.value?.selectedPersonality ?: "Friendly"
+            conversationManager.startLiveVoiceSession(
+                userId = "user_default",
+                personality = personality,
+                onVoiceStateChanged = { newState ->
+                    _voiceState.value = newState
+                },
+                onError = { error ->
                     _voiceState.value = "IDLE"
                 }
-            }
+            )
+        }
+    }
+
+    fun stopRealVoiceSession() {
+        conversationManager.stopLiveVoiceSession()
+        _voiceState.value = "IDLE"
+    }
+
+    fun onAudioPermissionResult(granted: Boolean) {
+        requestAudioPermissionEvent.value = false
+        if (granted) {
+            startRealVoiceSession()
         }
     }
 
@@ -421,21 +460,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 pitchHz = 195.0f,
                 hesitations = 1
             )
-            delay(4000)
+            delay(3000)
             if (_voiceState.value == "SPEAKING") {
                 _voiceState.value = "IDLE"
             }
         }
-    }
-
-    private suspend fun simulateSpeechAndPromptResponse() {
-        val dynamicQuotes = listOf(
-            "I had a great time today working on my project, but i go market yesterday to get groceries.",
-            "I am very happy to talk to you because she don't like when I feel sad.",
-            "I want to do more better in my English interview preparation next week."
-        )
-        val selectedPrompt = dynamicQuotes.random()
-        sendMessageDirectly(selectedPrompt)
     }
 
     // Active Quick Commands
@@ -619,5 +648,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             vocabList.forEach { database.vocabularyGrowthDao().insertVocabulary(it) }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        conversationManager.stopLiveVoiceSession()
     }
 }

@@ -1107,12 +1107,21 @@ fun ChatScreen(viewModel: MainViewModel) {
     val settings by viewModel.appSettings.collectAsState()
     val activeEmotion by viewModel.fusedEmotion.collectAsState()
     val voiceState by viewModel.voiceState.collectAsState()
+    val liveAudioLevel by viewModel.liveAudioLevel.collectAsState()
+    val liveError by viewModel.liveErrorMessage.collectAsState()
 
     val safetyNote by viewModel.safetyNotification.collectAsState()
     val correctionNote by viewModel.lastInvisibleCorrection.collectAsState()
 
     // Manage mute state
     var isMuted by remember { mutableStateOf(false) }
+
+    // Start real voice session on entering ChatScreen if idle
+    LaunchedEffect(Unit) {
+        if (voiceState == "IDLE") {
+            viewModel.startRealVoiceSession()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -1166,8 +1175,33 @@ fun ChatScreen(viewModel: MainViewModel) {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Modern overlays for grammar tips & safety notifications
-                if (safetyNote != null) {
+                // Error and status notifications
+                if (liveError != null) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFBA1A1A).copy(alpha = 0.9f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = liveError ?: "",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                } else if (safetyNote != null) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF881111).copy(alpha = 0.85f)),
                         shape = RoundedCornerShape(12.dp),
@@ -1224,9 +1258,9 @@ fun ChatScreen(viewModel: MainViewModel) {
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(40.dp))
 
-                // Gorgeous Pulsing Orbs
+                // Dynamic Audio Scale & Pulsing Orbs
                 val infiniteTransition = rememberInfiniteTransition(label = "pulse_trans")
                 val pulse1 by infiniteTransition.animateFloat(
                     initialValue = 1f,
@@ -1256,6 +1290,8 @@ fun ChatScreen(viewModel: MainViewModel) {
                     label = "p3"
                 )
 
+                val audioBoost = (liveAudioLevel * 1.5f).coerceIn(0f, 0.8f)
+
                 Box(
                     modifier = Modifier.size(200.dp),
                     contentAlignment = Alignment.Center
@@ -1264,11 +1300,11 @@ fun ChatScreen(viewModel: MainViewModel) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .scale(if (isMuted) 1.0f else if (voiceState == "LISTENING") pulse3 else if (voiceState == "SPEAKING") pulse2 else pulse1)
+                            .scale((if (isMuted) 1.0f else if (voiceState == "LISTENING") (pulse3 + audioBoost) else if (voiceState == "SPEAKING") pulse2 else pulse1))
                             .background(
                                 color = when {
                                     isMuted -> Color(0xFF424242).copy(alpha = 0.1f)
-                                    voiceState == "LISTENING" -> Color(0xFF6750A4).copy(alpha = 0.15f)
+                                    voiceState == "LISTENING" -> Color(0xFF6750A4).copy(alpha = 0.15f + audioBoost * 0.2f)
                                     voiceState == "THINKING" -> Color(0xFFE8DEF8).copy(alpha = 0.15f)
                                     voiceState == "SPEAKING" -> Color(0xFF00D2FF).copy(alpha = 0.15f)
                                     else -> Color(0xFFE8DEF8).copy(alpha = 0.08f)
@@ -1280,11 +1316,11 @@ fun ChatScreen(viewModel: MainViewModel) {
                     Box(
                         modifier = Modifier
                             .size(160.dp)
-                            .scale(if (isMuted) 1.0f else if (voiceState == "LISTENING") pulse2 else if (voiceState == "SPEAKING") pulse3 else pulse1)
+                            .scale((if (isMuted) 1.0f else if (voiceState == "LISTENING") (pulse2 + audioBoost) else if (voiceState == "SPEAKING") pulse3 else pulse1))
                             .background(
                                 color = when {
                                     isMuted -> Color(0xFF616161).copy(alpha = 0.15f)
-                                    voiceState == "LISTENING" -> Color(0xFF6750A4).copy(alpha = 0.22f)
+                                    voiceState == "LISTENING" -> Color(0xFF6750A4).copy(alpha = 0.22f + audioBoost * 0.2f)
                                     voiceState == "THINKING" -> Color(0xFFE8DEF8).copy(alpha = 0.2f)
                                     voiceState == "SPEAKING" -> Color(0xFF00D2FF).copy(alpha = 0.22f)
                                     else -> Color(0xFFE8DEF8).copy(alpha = 0.12f)
@@ -1296,6 +1332,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                     Box(
                         modifier = Modifier
                             .size(120.dp)
+                            .scale(1.0f + (audioBoost * 0.3f))
                             .background(
                                 brush = Brush.radialGradient(
                                     colors = when {
@@ -1326,11 +1363,11 @@ fun ChatScreen(viewModel: MainViewModel) {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(36.dp))
 
                 // Ambient speech transcription subtitle (accessible voice feedback)
                 val lastCompanionMessage = messages.lastOrNull { it.sender == "companion" }?.content
-                if (lastCompanionMessage != null && voiceState == "SPEAKING") {
+                if (lastCompanionMessage != null && (voiceState == "SPEAKING" || voiceState == "THINKING")) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(0.9f)
@@ -1368,11 +1405,11 @@ fun ChatScreen(viewModel: MainViewModel) {
                             isMuted = !isMuted
                             if (isMuted) {
                                 if (voiceState != "IDLE") {
-                                    viewModel.toggleVoiceState()
+                                    viewModel.stopRealVoiceSession()
                                 }
                             } else {
                                 if (voiceState == "IDLE") {
-                                    viewModel.toggleVoiceState()
+                                    viewModel.startRealVoiceSession()
                                 }
                             }
                         },

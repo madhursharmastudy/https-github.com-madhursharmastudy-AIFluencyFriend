@@ -1,8 +1,11 @@
 package com.example
 
+import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
@@ -13,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -37,6 +41,20 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyApplicationTheme {
                 val currentScreen by viewModel.currentScreen.collectAsState()
+                val requestPermission by viewModel.requestAudioPermissionEvent.collectAsState()
+
+                val audioPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission(),
+                    onResult = { granted ->
+                        viewModel.onAudioPermissionResult(granted)
+                    }
+                )
+
+                LaunchedEffect(requestPermission) {
+                    if (requestPermission) {
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),

@@ -5,14 +5,14 @@ import com.example.BuildConfig
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class GeminiProvider : AIProvider {
@@ -20,6 +20,7 @@ class GeminiProvider : AIProvider {
     private val tag = "GeminiProvider"
     var customApiKey: String? = null
     var customModelName: String = "gemini-2.5-flash"
+    var voiceName: String = "Aoede"
 
     private val moshi = Moshi.Builder()
         .addLast(KotlinJsonAdapterFactory())
@@ -30,6 +31,8 @@ class GeminiProvider : AIProvider {
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
+
+    private var activeLiveClient: GeminiLiveClient? = null
 
     fun getActiveApiKey(): String {
         val custom = customApiKey?.trim()
@@ -53,6 +56,32 @@ class GeminiProvider : AIProvider {
 
     override suspend fun disconnect() {
         Log.d(tag, "Disconnected from Gemini Provider")
+        activeLiveClient?.disconnect()
+        activeLiveClient = null
+    }
+
+    fun createLiveClient(
+        systemInstruction: String,
+        listener: GeminiLiveClient.LiveEventListener
+    ): GeminiLiveClient {
+        val apiKey = getActiveApiKey()
+        val liveModel = "gemini-2.5-flash-native-audio-preview-12-2025"
+        val liveClient = GeminiLiveClient(apiKey = apiKey, model = liveModel, voiceName = voiceName)
+        liveClient.listener = listener
+        liveClient.connect(systemInstruction)
+        activeLiveClient = liveClient
+        return liveClient
+    }
+
+    private fun normalizeModel(model: String): String {
+        val clean = model.trim()
+        return when {
+            clean.isEmpty() -> "gemini-2.5-flash"
+            clean.startsWith("models/") -> clean.removePrefix("models/")
+            clean == "gemini-1.5-flash" -> "gemini-2.5-flash"
+            clean == "gemini-1.5-pro" -> "gemini-2.5-flash"
+            else -> clean
+        }
     }
 
     suspend fun testConnection(apiKeyToTest: String, modelToTest: String): Result<String> = withContext(Dispatchers.IO) {
@@ -60,7 +89,7 @@ class GeminiProvider : AIProvider {
         if (cleanKey.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("API Key cannot be empty."))
         }
-        val model = modelToTest.trim().ifEmpty { "gemini-2.5-flash" }
+        val model = normalizeModel(modelToTest)
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey"
 
         val requestPayload = mapOf(
@@ -91,10 +120,11 @@ class GeminiProvider : AIProvider {
             client.newCall(request).execute().use { response ->
                 val bodyString = response.body?.string() ?: ""
                 if (!response.isSuccessful) {
-                    Log.e(tag, "Gemini Test Connection Error ($response): $bodyString")
-                    return@withContext Result.failure(Exception("Gemini API returned error code ${response.code}: $bodyString"))
+                    Log.e(tag, "Gemini Test Connection Error (${response.code}): $bodyString")
+                    val msg = parseErrorMessage(bodyString) ?: "HTTP ${response.code}"
+                    return@withContext Result.failure(Exception("Gemini error ($msg)"))
                 }
-                return@withContext Result.success("Connection successful! Gemini ($model) is active and ready.")
+                return@withContext Result.success("Connection successful! Gemini ($model) is active and responsive.")
             }
         } catch (e: Exception) {
             Log.e(tag, "Gemini Test Connection Failed", e)
@@ -106,13 +136,13 @@ class GeminiProvider : AIProvider {
         val apiKey = getActiveApiKey()
         if (apiKey.isEmpty()) {
             Log.e(tag, "Gemini API Key is missing!")
-            return@withContext "Hi there! To start speaking with me, please enter your Gemini API Key in the Settings screen or tap the API setup prompt above."
+            return@withContext "Hi there! Please enter your Gemini API Key in Settings to start our conversation."
         }
 
-        val model = customModelName.trim().ifEmpty { "gemini-2.5-flash" }
+        val model = normalizeModel(customModelName)
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
 
-        val requestPayload = mapOf(
+        val requestPayload = mutableMapOf<String, Any>(
             "contents" to listOf(
                 mapOf(
                     "role" to "user",
@@ -121,16 +151,19 @@ class GeminiProvider : AIProvider {
                     )
                 )
             ),
-            "systemInstruction" to mapOf(
+            "generationConfig" to mapOf(
+                "temperature" to 0.7,
+                "maxOutputTokens" to 500
+            )
+        )
+
+        if (systemInstruction.isNotBlank()) {
+            requestPayload["systemInstruction"] = mapOf(
                 "parts" to listOf(
                     mapOf("text" to systemInstruction)
                 )
-            ),
-            "generationConfig" to mapOf(
-                "temperature" to 0.7,
-                "responseMimeType" to "text/plain"
             )
-        )
+        }
 
         val jsonAdapter = moshi.adapter(Map::class.java)
         val jsonString = jsonAdapter.toJson(requestPayload)
@@ -143,15 +176,18 @@ class GeminiProvider : AIProvider {
 
         try {
             client.newCall(request).execute().use { response ->
+                val bodyString = response.body?.string() ?: ""
                 if (!response.isSuccessful) {
-                    val errorBody = response.body?.string() ?: ""
-                    Log.e(tag, "Gemini API Error ($response): $errorBody")
-                    return@withContext "I encountered a connection issue (${response.code}). Please verify your Gemini API key in Settings."
+                    Log.e(tag, "Gemini API Error (${response.code}): $bodyString")
+                    val parsedError = parseErrorMessage(bodyString)
+                    return@withContext if (parsedError != null) {
+                        "Gemini API issue (${response.code}): $parsedError. Please verify your API key in Settings."
+                    } else {
+                        "I had trouble connecting (${response.code}). Please check your API key or model in Settings."
+                    }
                 }
 
-                val bodyString = response.body?.string() ?: ""
                 val responseMap = moshi.adapter(Map::class.java).fromJson(bodyString)
-                
                 val candidates = responseMap?.get("candidates") as? List<*>
                 val firstCandidate = candidates?.firstOrNull() as? Map<*, *>
                 val content = firstCandidate?.get("content") as? Map<*, *>
@@ -159,15 +195,70 @@ class GeminiProvider : AIProvider {
                 val firstPart = parts?.firstOrNull() as? Map<*, *>
                 val text = firstPart?.get("text") as? String
 
-                return@withContext text ?: "I am listening closely, tell me more!"
+                return@withContext text?.trim() ?: "I heard you clearly, let's keep practicing!"
             }
-        } catch (e: IOException) {
-            Log.e(tag, "Network call failed", e)
-            return@withContext "Sorry, I had trouble reaching the Gemini service. Please check your internet connection and API key."
+        } catch (e: Exception) {
+            Log.e(tag, "Gemini Network Call Failed", e)
+            return@withContext "Network connection failed: ${e.localizedMessage ?: "Unable to reach Gemini"}. Please check your internet connection."
         }
     }
 
-    override suspend fun streamAudio(audioData: ByteArray): Flow<ByteArray> = flow {
-        emit(ByteArray(0))
+    private fun parseErrorMessage(json: String): String? {
+        return try {
+            val map = moshi.adapter(Map::class.java).fromJson(json)
+            val errorObj = map?.get("error") as? Map<*, *>
+            errorObj?.get("message") as? String
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    override suspend fun streamAudio(audioData: ByteArray): Flow<ByteArray> = callbackFlow {
+        val apiKey = getActiveApiKey()
+        if (apiKey.isBlank()) {
+            close(IllegalStateException("Gemini API key missing"))
+            return@callbackFlow
+        }
+
+        val client = GeminiLiveClient(
+            apiKey = apiKey,
+            model = "gemini-2.5-flash-native-audio-preview-12-2025",
+            voiceName = voiceName
+        )
+
+        client.listener = object : GeminiLiveClient.LiveEventListener {
+            override fun onConnected() {}
+            override fun onSetupComplete() {
+                client.sendAudioChunk(audioData)
+            }
+
+            override fun onAudioChunkReceived(audioData: ByteArray) {
+                trySend(audioData)
+            }
+
+            override fun onTranscriptChunkReceived(text: String) {}
+
+            override fun onTurnComplete() {
+                close()
+            }
+
+            override fun onInterrupted() {
+                close()
+            }
+
+            override fun onError(error: String) {
+                close(Exception(error))
+            }
+
+            override fun onDisconnected(reason: String) {
+                close()
+            }
+        }
+
+        client.connect("")
+
+        awaitClose {
+            client.disconnect()
+        }
     }
 }

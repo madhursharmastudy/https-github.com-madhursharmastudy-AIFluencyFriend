@@ -2,6 +2,8 @@ package com.example.conversation
 
 import android.content.Context
 import android.util.Log
+import com.example.audio.AudioRecordManager
+import com.example.audio.AudioTrackPlayer
 import com.example.data.database.AppDatabase
 import com.example.data.database.entity.Session
 import com.example.data.database.entity.SessionMessage
@@ -12,15 +14,14 @@ import com.example.english.EnglishEngine
 import com.example.memory.MemoryExtractor
 import com.example.memory.MemoryRanker
 import com.example.providers.AIProvider
+import com.example.providers.GeminiLiveClient
+import com.example.providers.GeminiProvider
 import com.example.relationship.RelationshipManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class ConversationManager(
@@ -29,7 +30,7 @@ class ConversationManager(
     private val aiProvider: AIProvider
 ) {
     private val tag = "ConversationManager"
-    private val coroutineScope = CoroutineScope(Dispatchers.IO)
+    private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // Sub-engine instantiations
     private val contextBuilder = ContextBuilder()
@@ -40,6 +41,10 @@ class ConversationManager(
     private val emotionFusionEngine = EmotionFusionEngine()
     private val relationshipManager = RelationshipManager()
     private val englishEngine = EnglishEngine()
+
+    // Real-time Audio Hardware Engines
+    val audioRecordManager = AudioRecordManager(context)
+    val audioTrackPlayer = AudioTrackPlayer(sampleRate = 24000)
 
     // State parameters
     private val _currentSessionId = MutableStateFlow<String?>(null)
@@ -54,7 +59,16 @@ class ConversationManager(
     private val _sessionMessages = MutableStateFlow<List<SessionMessage>>(emptyList())
     val sessionMessages: StateFlow<List<SessionMessage>> = _sessionMessages.asStateFlow()
 
+    private val _liveAudioLevel = MutableStateFlow(0f)
+    val liveAudioLevel: StateFlow<Float> = _liveAudioLevel.asStateFlow()
+
+    private val _liveErrorMessage = MutableStateFlow<String?>(null)
+    val liveErrorMessage: StateFlow<String?> = _liveErrorMessage.asStateFlow()
+
+    private var activeLiveClient: GeminiLiveClient? = null
     private var sessionStartTime: Long = 0
+    private var currentModelTurnTranscript = StringBuilder()
+    private var isLiveStreamingActive = false
 
     // Lifecycle methods
     suspend fun startSession(userId: String, initialPersonality: String) = withContext(Dispatchers.IO) {
@@ -101,12 +115,12 @@ class ConversationManager(
     }
 
     suspend fun endSession() = withContext(Dispatchers.IO) {
+        stopLiveVoiceSession()
+
         val sessionId = _currentSessionId.value ?: return@withContext
         val endTime = System.currentTimeMillis()
         val durationSec = ((endTime - sessionStartTime) / 1000).toInt()
 
-        // Save session stats
-        val currentSessionVal = database.sessionDao().toString() // lookup details
         val totalMsgs = _sessionMessages.value.size
         
         val finishedSession = Session(
@@ -124,8 +138,10 @@ class ConversationManager(
         // Process Memory Extraction on final transcripts
         coroutineScope.launch {
             val transcript = _sessionMessages.value.joinToString("\n") { "${it.sender}: ${it.content}" }
-            memoryExtractor.extractAndSaveMemories(transcript) { extractedMemory ->
-                database.memoryFactDao().insertMemoryFact(extractedMemory)
+            if (transcript.isNotBlank()) {
+                memoryExtractor.extractAndSaveMemories(transcript) { extractedMemory ->
+                    database.memoryFactDao().insertMemoryFact(extractedMemory)
+                }
             }
         }
 
@@ -133,6 +149,194 @@ class ConversationManager(
         _currentSessionId.value = null
         _isSessionActive.value = false
         Log.d(tag, "Session ended successfully: $sessionId in $durationSec seconds.")
+    }
+
+    /**
+     * Starts Real-Time Gemini Multimodal Live Voice session via WebSockets,
+     * AudioRecord (16kHz PCM), and AudioTrack (24kHz PCM).
+     */
+    suspend fun startLiveVoiceSession(
+        userId: String,
+        personality: String,
+        onVoiceStateChanged: (String) -> Unit,
+        onError: (String) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        _liveErrorMessage.value = null
+
+        if (!_isSessionActive.value || _currentSessionId.value == null) {
+            startSession(userId, personality)
+        }
+
+        val sessionId = _currentSessionId.value ?: UUID.randomUUID().toString()
+
+        // 1. Fetch active memories & build system context
+        val activeMemories = database.memoryFactDao().getAllActiveMemories().firstOrNull() ?: emptyList()
+        val topMemories = memoryRanker.rankMemories(activeMemories, sessionId)
+        val memoryStrings = topMemories.map { it.fact }
+
+        val systemPrompt = contextBuilder.buildSystemInstruction(
+            personality = personality,
+            emotionState = _activeFusedEmotion.value.emotion,
+            relationshipLevel = 5,
+            goals = listOf("Improve speaking fluency", "Gain conversational confidence"),
+            memories = memoryStrings,
+            isEnglishCorrectionEnabled = true
+        )
+
+        // 2. Initialize AudioTrack player
+        audioTrackPlayer.initialize(coroutineScope)
+        audioTrackPlayer.onPlaybackStarted = {
+            onVoiceStateChanged("SPEAKING")
+        }
+        audioTrackPlayer.onPlaybackCompleted = {
+            if (isLiveStreamingActive) {
+                onVoiceStateChanged("LISTENING")
+            }
+        }
+
+        // 3. Connect Gemini Live Client
+        val geminiProv = aiProvider as? GeminiProvider
+        val apiKey = geminiProv?.getActiveApiKey() ?: ""
+        if (apiKey.isBlank()) {
+            onError("Gemini API Key is not configured. Please add your key in Settings.")
+            return@withContext
+        }
+
+        onVoiceStateChanged("THINKING")
+        isLiveStreamingActive = true
+        currentModelTurnTranscript.clear()
+
+        val liveClient = GeminiLiveClient(
+            apiKey = apiKey,
+            model = "gemini-2.5-flash-native-audio-preview-12-2025",
+            voiceName = geminiProv?.voiceName ?: "Aoede"
+        )
+
+        liveClient.listener = object : GeminiLiveClient.LiveEventListener {
+            override fun onConnected() {
+                Log.i(tag, "Gemini Live WebSocket Connected")
+            }
+
+            override fun onSetupComplete() {
+                Log.i(tag, "Gemini Live Setup Complete -> starting microphone streaming")
+                onVoiceStateChanged("LISTENING")
+
+                // Start recording microphone audio (16kHz 16-bit Mono)
+                audioRecordManager.startRecording(
+                    scope = coroutineScope,
+                    onAudioChunk = { chunkBytes, rmsLevel ->
+                        _liveAudioLevel.value = rmsLevel
+                        if (isLiveStreamingActive) {
+                            liveClient.sendAudioChunk(chunkBytes)
+                            // Feed live audio level to voice emotion analyzer
+                            submitEmotionFactors(
+                                isSmile = false,
+                                isFurrowed = false,
+                                isEyesClosed = false,
+                                volumeVariance = rmsLevel * 1000f,
+                                pitchHz = 160f + (rmsLevel * 80f),
+                                hesitations = 0
+                            )
+                        }
+                    },
+                    onError = { micError ->
+                        Log.e(tag, "Mic error: $micError")
+                        onError(micError)
+                        _liveErrorMessage.value = micError
+                    }
+                )
+            }
+
+            override fun onAudioChunkReceived(audioData: ByteArray) {
+                audioTrackPlayer.enqueueAudio(audioData)
+            }
+
+            override fun onTranscriptChunkReceived(text: String) {
+                currentModelTurnTranscript.append(text)
+                // Update live transcript subtitle in message list
+                updateLiveCompanionTranscript(sessionId, currentModelTurnTranscript.toString())
+            }
+
+            override fun onTurnComplete() {
+                Log.d(tag, "Companion turn complete")
+                val fullTranscript = currentModelTurnTranscript.toString().trim()
+                if (fullTranscript.isNotEmpty()) {
+                    commitCompletedCompanionMessage(sessionId, fullTranscript)
+                }
+                currentModelTurnTranscript.clear()
+            }
+
+            override fun onInterrupted() {
+                Log.d(tag, "Companion speech interrupted by user voice")
+                audioTrackPlayer.stopAndFlush()
+                currentModelTurnTranscript.clear()
+                onVoiceStateChanged("LISTENING")
+            }
+
+            override fun onError(error: String) {
+                Log.e(tag, "Gemini Live Error: $error")
+                _liveErrorMessage.value = error
+                onError(error)
+                stopLiveVoiceSession()
+                onVoiceStateChanged("IDLE")
+            }
+
+            override fun onDisconnected(reason: String) {
+                Log.i(tag, "Gemini Live Disconnected: $reason")
+                if (isLiveStreamingActive) {
+                    stopLiveVoiceSession()
+                    onVoiceStateChanged("IDLE")
+                }
+            }
+        }
+
+        activeLiveClient = liveClient
+        liveClient.connect(systemPrompt)
+    }
+
+    private fun updateLiveCompanionTranscript(sessionId: String, transcript: String) {
+        val currentList = _sessionMessages.value.toMutableList()
+        val lastIndex = currentList.indexOfLast { it.sender == "companion" && it.messageId.startsWith("live_") }
+        val liveMsg = SessionMessage(
+            messageId = "live_current",
+            sessionId = sessionId,
+            sender = "companion",
+            content = transcript,
+            timestamp = System.currentTimeMillis()
+        )
+        if (lastIndex >= 0) {
+            currentList[lastIndex] = liveMsg
+        } else {
+            currentList.add(liveMsg)
+        }
+        _sessionMessages.value = currentList
+    }
+
+    private fun commitCompletedCompanionMessage(sessionId: String, fullTranscript: String) {
+        coroutineScope.launch(Dispatchers.IO) {
+            val finalMsg = SessionMessage(
+                messageId = UUID.randomUUID().toString(),
+                sessionId = sessionId,
+                sender = "companion",
+                content = fullTranscript,
+                timestamp = System.currentTimeMillis()
+            )
+            database.sessionMessageDao().insertMessage(finalMsg)
+
+            // Replace ephemeral live message with persisted final message
+            val cleaned = _sessionMessages.value.filterNot { it.messageId == "live_current" } + finalMsg
+            _sessionMessages.value = cleaned
+        }
+    }
+
+    fun stopLiveVoiceSession() {
+        isLiveStreamingActive = false
+        audioRecordManager.stopRecording()
+        audioTrackPlayer.stopAndFlush()
+        audioTrackPlayer.release()
+        activeLiveClient?.disconnect()
+        activeLiveClient = null
+        _liveAudioLevel.value = 0f
     }
 
     suspend fun sendMessage(
