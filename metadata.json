@@ -1,0 +1,8 @@
+{
+  "name": "AI Fluency Friend",
+  "description": "An emotionally intelligent AI companion designed to improve English communication, confidence, and fluency through voice-first conversations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
