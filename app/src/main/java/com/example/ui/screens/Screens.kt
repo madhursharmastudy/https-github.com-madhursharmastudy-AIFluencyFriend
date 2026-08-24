@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.database.entity.Goal
 import com.example.data.database.entity.MemoryFact
 import com.example.data.database.entity.Session
+import com.example.debug.LiveDebugLogger
 import com.example.ui.viewmodel.MainViewModel
 
 // ==========================================
@@ -1113,6 +1114,20 @@ fun ChatScreen(viewModel: MainViewModel) {
     val safetyNote by viewModel.safetyNotification.collectAsState()
     val correctionNote by viewModel.lastInvisibleCorrection.collectAsState()
 
+    // Debug logs state
+    val debugLogs by LiveDebugLogger.logs.collectAsState()
+    val wsStatus by LiveDebugLogger.wsStatus.collectAsState()
+    var isDebugPanelOpen by remember { mutableStateOf(false) }
+    val clipboardManager = LocalClipboardManager.current
+    val debugListState = rememberLazyListState()
+
+    // Auto-scroll debug logs to the bottom when new logs arrive
+    LaunchedEffect(debugLogs.size) {
+        if (debugLogs.isNotEmpty()) {
+            debugListState.animateScrollToItem(debugLogs.size - 1)
+        }
+    }
+
     // Manage mute state
     var isMuted by remember { mutableStateOf(false) }
 
@@ -1144,31 +1159,61 @@ fun ChatScreen(viewModel: MainViewModel) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Top Section: Empathy Pill & Modern Warnings
+            // 1. Top Section: Empathy Pill, Debug Toggle & Modern Warnings
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(
-                    modifier = Modifier
-                        .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(
-                                    if (isMuted) Color.Gray else Color(0xFF34C759),
-                                    CircleShape
-                                )
+                    Box(
+                        modifier = Modifier
+                            .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(
+                                        if (isMuted) Color.Gray else Color(0xFF34C759),
+                                        CircleShape
+                                    )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Empathy Sync: ${activeEmotion.emotion} (${activeEmotion.confidence}%)",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Debug Log Toggle Button
+                    Button(
+                        onClick = { isDebugPanelOpen = !isDebugPanelOpen },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isDebugPanelOpen) Color(0xFF6750A4) else Color.White.copy(alpha = 0.15f),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BugReport,
+                            contentDescription = "Toggle Debug Log",
+                            modifier = Modifier.size(15.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Empathy Sync: ${activeEmotion.emotion} (${activeEmotion.confidence}%)",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                            text = if (isDebugPanelOpen) "Hide Logs" else "Debug Log",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -1463,6 +1508,221 @@ fun ChatScreen(viewModel: MainViewModel) {
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                }
+            }
+        }
+
+        // 4. Overlaid Collapsible Real-Time Debug Log Bottom Sheet/Panel
+        AnimatedVisibility(
+            visible = isDebugPanelOpen,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF13111E).copy(alpha = 0.96f)),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                border = BorderStroke(1.dp, Color(0xFF6750A4).copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.65f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    // Header with Status badges and Actions
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.BugReport,
+                                contentDescription = null,
+                                tint = Color(0xFFD0BCFF),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Live Diagnostics",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Copy logs button
+                            IconButton(
+                                onClick = {
+                                    val logText = LiveDebugLogger.getAllLogsText()
+                                    clipboardManager.setText(AnnotatedString(logText))
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "Copy logs",
+                                    tint = Color(0xFFD0BCFF),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            // Clear logs button
+                            IconButton(
+                                onClick = { LiveDebugLogger.clear() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = "Clear logs",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            // Close button
+                            IconButton(
+                                onClick = { isDebugPanelOpen = false },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close debug panel",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Status Bar: Voice State & WebSocket Status
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Voice State: ", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        when (voiceState) {
+                                            "LISTENING" -> Color(0xFF34C759).copy(alpha = 0.2f)
+                                            "THINKING" -> Color(0xFFFFCC00).copy(alpha = 0.2f)
+                                            "SPEAKING" -> Color(0xFF00D2FF).copy(alpha = 0.2f)
+                                            else -> Color.Gray.copy(alpha = 0.2f)
+                                        },
+                                        RoundedCornerShape(4.dp)
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = voiceState,
+                                    color = when (voiceState) {
+                                        "LISTENING" -> Color(0xFF34C759)
+                                        "THINKING" -> Color(0xFFFFCC00)
+                                        "SPEAKING" -> Color(0xFF00D2FF)
+                                        else -> Color.LightGray
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("WebSocket: ", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        when (wsStatus) {
+                                            "Connected" -> Color(0xFF34C759).copy(alpha = 0.2f)
+                                            "Connecting" -> Color(0xFFFFCC00).copy(alpha = 0.2f)
+                                            else -> Color(0xFFBA1A1A).copy(alpha = 0.2f)
+                                        },
+                                        RoundedCornerShape(4.dp)
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = wsStatus,
+                                    color = when (wsStatus) {
+                                        "Connected" -> Color(0xFF34C759)
+                                        "Connecting" -> Color(0xFFFFCC00)
+                                        else -> Color(0xFFFF6B6B)
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Scrolling Log List
+                    if (debugLogs.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "No live events logged yet. Start speaking or connect.",
+                                color = Color.White.copy(alpha = 0.4f),
+                                fontSize = 12.sp
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            state = debugListState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            items(debugLogs) { logEntry ->
+                                val color = when (logEntry.level) {
+                                    LiveDebugLogger.LogLevel.SUCCESS -> Color(0xFF34C759)
+                                    LiveDebugLogger.LogLevel.ERROR -> Color(0xFFFF6B6B)
+                                    LiveDebugLogger.LogLevel.WARN -> Color(0xFFFFCC00)
+                                    LiveDebugLogger.LogLevel.DATA -> Color(0xFF81D4FA)
+                                    LiveDebugLogger.LogLevel.INFO -> Color(0xFFE0E0E0)
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = logEntry.timestamp,
+                                        color = Color.White.copy(alpha = 0.4f),
+                                        fontSize = 10.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = logEntry.message,
+                                        color = color,
+                                        fontSize = 11.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -69,6 +69,27 @@ class ConversationManager(
     private var sessionStartTime: Long = 0
     private var currentModelTurnTranscript = StringBuilder()
     private var isLiveStreamingActive = false
+    private var responseWatchdogJob: Job? = null
+
+    private fun startResponseWatchdog(onVoiceStateChanged: (String) -> Unit) {
+        responseWatchdogJob?.cancel()
+        responseWatchdogJob = coroutineScope.launch {
+            delay(20_000L) // 20 seconds timeout
+            if (isLiveStreamingActive) {
+                Log.w(tag, "Gemini Live response timeout reached (20s). Resetting voice state to IDLE.")
+                _liveErrorMessage.value = "No response received, please try again."
+                stopLiveVoiceSession()
+                withContext(Dispatchers.Main) {
+                    onVoiceStateChanged("IDLE")
+                }
+            }
+        }
+    }
+
+    private fun cancelResponseWatchdog() {
+        responseWatchdogJob?.cancel()
+        responseWatchdogJob = null
+    }
 
     // Lifecycle methods
     suspend fun startSession(userId: String, initialPersonality: String) = withContext(Dispatchers.IO) {
@@ -205,10 +226,11 @@ class ConversationManager(
         onVoiceStateChanged("THINKING")
         isLiveStreamingActive = true
         currentModelTurnTranscript.clear()
+        startResponseWatchdog(onVoiceStateChanged)
 
         val liveClient = GeminiLiveClient(
             apiKey = apiKey,
-            model = "gemini-2.5-flash-native-audio-preview-12-2025",
+            model = "gemini-3.1-flash-live-preview",
             voiceName = geminiProv?.voiceName ?: "Aoede"
         )
 
@@ -219,6 +241,7 @@ class ConversationManager(
 
             override fun onSetupComplete() {
                 Log.i(tag, "Gemini Live Setup Complete -> starting microphone streaming")
+                cancelResponseWatchdog()
                 onVoiceStateChanged("LISTENING")
 
                 // Start recording microphone audio (16kHz 16-bit Mono)
@@ -241,6 +264,7 @@ class ConversationManager(
                     },
                     onError = { micError ->
                         Log.e(tag, "Mic error: $micError")
+                        cancelResponseWatchdog()
                         onError(micError)
                         _liveErrorMessage.value = micError
                     }
@@ -248,10 +272,12 @@ class ConversationManager(
             }
 
             override fun onAudioChunkReceived(audioData: ByteArray) {
+                cancelResponseWatchdog()
                 audioTrackPlayer.enqueueAudio(audioData)
             }
 
             override fun onTranscriptChunkReceived(text: String) {
+                cancelResponseWatchdog()
                 currentModelTurnTranscript.append(text)
                 // Update live transcript subtitle in message list
                 updateLiveCompanionTranscript(sessionId, currentModelTurnTranscript.toString())
@@ -259,6 +285,7 @@ class ConversationManager(
 
             override fun onTurnComplete() {
                 Log.d(tag, "Companion turn complete")
+                cancelResponseWatchdog()
                 val fullTranscript = currentModelTurnTranscript.toString().trim()
                 if (fullTranscript.isNotEmpty()) {
                     commitCompletedCompanionMessage(sessionId, fullTranscript)
@@ -268,6 +295,7 @@ class ConversationManager(
 
             override fun onInterrupted() {
                 Log.d(tag, "Companion speech interrupted by user voice")
+                cancelResponseWatchdog()
                 audioTrackPlayer.stopAndFlush()
                 currentModelTurnTranscript.clear()
                 onVoiceStateChanged("LISTENING")
@@ -275,6 +303,7 @@ class ConversationManager(
 
             override fun onError(error: String) {
                 Log.e(tag, "Gemini Live Error: $error")
+                cancelResponseWatchdog()
                 _liveErrorMessage.value = error
                 onError(error)
                 stopLiveVoiceSession()
@@ -283,6 +312,7 @@ class ConversationManager(
 
             override fun onDisconnected(reason: String) {
                 Log.i(tag, "Gemini Live Disconnected: $reason")
+                cancelResponseWatchdog()
                 if (isLiveStreamingActive) {
                     stopLiveVoiceSession()
                     onVoiceStateChanged("IDLE")
@@ -330,6 +360,7 @@ class ConversationManager(
     }
 
     fun stopLiveVoiceSession() {
+        cancelResponseWatchdog()
         isLiveStreamingActive = false
         audioRecordManager.stopRecording()
         audioTrackPlayer.stopAndFlush()

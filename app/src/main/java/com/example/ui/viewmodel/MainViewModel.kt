@@ -344,9 +344,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun handleEndSession() {
+        _voiceState.value = "IDLE"
+        conversationManager.stopLiveVoiceSession()
         viewModelScope.launch {
-            conversationManager.stopLiveVoiceSession()
-            _voiceState.value = "IDLE"
             conversationManager.endSession()
         }
     }
@@ -399,8 +399,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopRealVoiceSession() {
-        conversationManager.stopLiveVoiceSession()
         _voiceState.value = "IDLE"
+        conversationManager.stopLiveVoiceSession()
     }
 
     fun onAudioPermissionResult(granted: Boolean) {

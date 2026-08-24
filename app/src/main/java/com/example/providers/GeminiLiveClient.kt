@@ -2,6 +2,7 @@ package com.example.providers
 
 import android.util.Base64
 import android.util.Log
+import com.example.debug.LiveDebugLogger
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.*
@@ -13,7 +14,7 @@ import java.util.concurrent.TimeUnit
  */
 class GeminiLiveClient(
     private val apiKey: String,
-    private val model: String = "gemini-2.5-flash-native-audio-preview-12-2025",
+    private val model: String = "gemini-3.1-flash-live-preview",
     private val voiceName: String = "Aoede"
 ) {
     private val tag = "GeminiLiveClient"
@@ -47,21 +48,28 @@ class GeminiLiveClient(
 
     private var isConnected = false
     private var isSetupDone = false
+    private var sentAudioChunkCount = 0
+    private var receivedAudioChunkCount = 0
 
     fun isReady(): Boolean = isConnected && isSetupDone
 
     fun connect(systemInstructionText: String) {
         if (apiKey.isBlank()) {
+            LiveDebugLogger.log("Connect failed: Gemini API key is missing", LiveDebugLogger.LogLevel.ERROR)
             listener?.onError("Gemini API key is missing. Please set it in Settings.")
             return
         }
 
         disconnect()
+        sentAudioChunkCount = 0
+        receivedAudioChunkCount = 0
 
         val normalizedModel = if (model.startsWith("models/")) model else "models/$model"
         val wsUrl = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey"
 
         Log.i(tag, "Connecting to Gemini Live WebSocket ($normalizedModel)...")
+        LiveDebugLogger.setWsStatus("Connecting")
+        LiveDebugLogger.log("WebSocket connecting to $normalizedModel...", LiveDebugLogger.LogLevel.INFO)
 
         val request = Request.Builder()
             .url(wsUrl)
@@ -71,6 +79,8 @@ class GeminiLiveClient(
             override fun onOpen(ws: WebSocket, response: Response) {
                 Log.i(tag, "WebSocket opened successfully")
                 isConnected = true
+                LiveDebugLogger.setWsStatus("Connected")
+                LiveDebugLogger.log("WebSocket opened (HTTP ${response.code})", LiveDebugLogger.LogLevel.SUCCESS)
                 listener?.onConnected()
 
                 // Send BidiGenerateContentSetup message
@@ -83,6 +93,7 @@ class GeminiLiveClient(
 
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {
                 Log.i(tag, "WebSocket closing: code=$code, reason=$reason")
+                LiveDebugLogger.log("WebSocket closing: code=$code, reason=$reason", LiveDebugLogger.LogLevel.WARN)
                 ws.close(code, reason)
             }
 
@@ -90,6 +101,8 @@ class GeminiLiveClient(
                 Log.i(tag, "WebSocket closed: code=$code, reason=$reason")
                 isConnected = false
                 isSetupDone = false
+                LiveDebugLogger.setWsStatus("Disconnected")
+                LiveDebugLogger.log("WebSocket closed: code=$code, reason=$reason", LiveDebugLogger.LogLevel.WARN)
                 listener?.onDisconnected(reason)
             }
 
@@ -97,12 +110,14 @@ class GeminiLiveClient(
                 Log.e(tag, "WebSocket failure: ${t.localizedMessage}", t)
                 isConnected = false
                 isSetupDone = false
+                LiveDebugLogger.setWsStatus("Disconnected")
                 val errorMsg = if (response != null) {
                     val body = try { response.body?.string() } catch (_: Exception) { null }
                     "Gemini Live error (HTTP ${response.code}): ${body ?: t.localizedMessage}"
                 } else {
                     t.localizedMessage ?: "Connection error to Gemini Live API"
                 }
+                LiveDebugLogger.log("WebSocket failure: $errorMsg", LiveDebugLogger.LogLevel.ERROR)
                 listener?.onError(errorMsg)
             }
         })
@@ -134,6 +149,7 @@ class GeminiLiveClient(
         val fullMessage = mapOf("setup" to setupPayload)
         val json = mapAdapter.toJson(fullMessage)
         Log.d(tag, "Sending setup message: $json")
+        LiveDebugLogger.log("Setup message sent: $modelName (Voice: $voiceName)", LiveDebugLogger.LogLevel.INFO)
         webSocket?.send(json)
     }
 
@@ -153,7 +169,13 @@ class GeminiLiveClient(
         )
 
         val json = mapAdapter.toJson(realtimeInput)
-        webSocket?.send(json)
+        val sent = webSocket?.send(json) ?: false
+        if (sent) {
+            sentAudioChunkCount++
+            if (sentAudioChunkCount % 20 == 1) { // Log periodically to avoid flooding
+                LiveDebugLogger.log("Audio chunk sent (#$sentAudioChunkCount): ${pcm16kChunk.size} bytes", LiveDebugLogger.LogLevel.DATA)
+            }
+        }
     }
 
     fun sendTextMessage(userPrompt: String) {
@@ -174,6 +196,7 @@ class GeminiLiveClient(
         )
 
         val json = mapAdapter.toJson(contentMessage)
+        LiveDebugLogger.log("Text message sent: \"$userPrompt\"", LiveDebugLogger.LogLevel.INFO)
         webSocket?.send(json)
     }
 
@@ -185,6 +208,7 @@ class GeminiLiveClient(
             if (root.containsKey("setupComplete")) {
                 Log.i(tag, "Gemini Live Setup Completed!")
                 isSetupDone = true
+                LiveDebugLogger.log("Setup complete received from Gemini Live", LiveDebugLogger.LogLevel.SUCCESS)
                 listener?.onSetupComplete()
                 return
             }
@@ -194,6 +218,7 @@ class GeminiLiveClient(
                 val errorObj = root["error"] as? Map<*, *>
                 val msg = errorObj?.get("message") as? String ?: "Unknown Live API error"
                 Log.e(tag, "Gemini Live returned error: $msg")
+                LiveDebugLogger.log("Error from server: $msg", LiveDebugLogger.LogLevel.ERROR)
                 listener?.onError(msg)
                 return
             }
@@ -204,6 +229,7 @@ class GeminiLiveClient(
                 val interrupted = serverContent["interrupted"] as? Boolean ?: false
                 if (interrupted) {
                     Log.d(tag, "Server indicated interruption")
+                    LiveDebugLogger.log("Model turn interrupted by user voice", LiveDebugLogger.LogLevel.WARN)
                     listener?.onInterrupted()
                 }
 
@@ -216,6 +242,7 @@ class GeminiLiveClient(
                         // Handle text transcript
                         val text = partMap["text"] as? String
                         if (!text.isNullOrEmpty()) {
+                            LiveDebugLogger.log("Transcript received: \"$text\"", LiveDebugLogger.LogLevel.INFO)
                             listener?.onTranscriptChunkReceived(text)
                         }
 
@@ -225,6 +252,10 @@ class GeminiLiveClient(
                             val base64Data = inlineData["data"] as? String
                             if (!base64Data.isNullOrEmpty()) {
                                 val audioBytes = Base64.decode(base64Data, Base64.NO_WRAP)
+                                receivedAudioChunkCount++
+                                if (receivedAudioChunkCount % 15 == 1) {
+                                    LiveDebugLogger.log("Audio chunk received (#$receivedAudioChunkCount): ${audioBytes.size} bytes", LiveDebugLogger.LogLevel.DATA)
+                                }
                                 listener?.onAudioChunkReceived(audioBytes)
                             }
                         }
@@ -234,16 +265,19 @@ class GeminiLiveClient(
                 val turnComplete = serverContent["turnComplete"] as? Boolean ?: false
                 if (turnComplete) {
                     Log.d(tag, "Turn complete signal received")
+                    LiveDebugLogger.log("Turn complete received", LiveDebugLogger.LogLevel.SUCCESS)
                     listener?.onTurnComplete()
                 }
             }
         } catch (e: Exception) {
             Log.e(tag, "Failed to parse incoming WebSocket message: $jsonText", e)
+            LiveDebugLogger.log("Parse error: ${e.localizedMessage}", LiveDebugLogger.LogLevel.ERROR)
         }
     }
 
     fun disconnect() {
         try {
+            webSocket?.cancel()
             webSocket?.close(1000, "User ended session")
         } catch (e: Exception) {
             Log.e(tag, "Error closing WebSocket", e)
@@ -251,6 +285,8 @@ class GeminiLiveClient(
             webSocket = null
             isConnected = false
             isSetupDone = false
+            LiveDebugLogger.setWsStatus("Disconnected")
+            LiveDebugLogger.log("Disconnected: WebSocket session closed", LiveDebugLogger.LogLevel.INFO)
         }
     }
 }

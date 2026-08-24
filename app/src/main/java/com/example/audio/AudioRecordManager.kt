@@ -8,6 +8,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.debug.LiveDebugLogger
 import kotlinx.coroutines.*
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -50,7 +51,9 @@ class AudioRecordManager(private val context: Context) {
         }
 
         if (!hasPermission()) {
-            onError("Microphone permission (RECORD_AUDIO) not granted.")
+            val msg = "Microphone permission (RECORD_AUDIO) not granted."
+            LiveDebugLogger.log("Mic error: $msg", LiveDebugLogger.LogLevel.ERROR)
+            onError(msg)
             return
         }
 
@@ -61,7 +64,9 @@ class AudioRecordManager(private val context: Context) {
         )
 
         if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
-            onError("AudioRecord hardware configuration not supported.")
+            val msg = "AudioRecord hardware configuration not supported."
+            LiveDebugLogger.log("Mic error: $msg", LiveDebugLogger.LogLevel.ERROR)
+            onError(msg)
             return
         }
 
@@ -77,7 +82,9 @@ class AudioRecordManager(private val context: Context) {
             )
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                onError("Failed to initialize microphone hardware.")
+                val msg = "Failed to initialize microphone hardware."
+                LiveDebugLogger.log("Mic error: $msg", LiveDebugLogger.LogLevel.ERROR)
+                onError(msg)
                 audioRecord?.release()
                 audioRecord = null
                 return
@@ -86,6 +93,7 @@ class AudioRecordManager(private val context: Context) {
             audioRecord?.startRecording()
             isRecording = true
             Log.i(tag, "AudioRecord started: 16kHz 16-bit Mono")
+            LiveDebugLogger.log("Microphone recording started (16kHz 16-bit Mono PCM)", LiveDebugLogger.LogLevel.INFO)
 
             recordingJob = scope.launch(Dispatchers.IO) {
                 val audioBuffer = ByteArray(CHUNK_SIZE_BYTES)
@@ -100,17 +108,22 @@ class AudioRecordManager(private val context: Context) {
                         onAudioChunk(chunkCopy, rms)
                     } else if (readBytes < 0) {
                         Log.e(tag, "Error reading from AudioRecord: $readBytes")
+                        LiveDebugLogger.log("AudioRecord read error: $readBytes", LiveDebugLogger.LogLevel.WARN)
                         delay(20)
                     }
                 }
             }
         } catch (se: SecurityException) {
             Log.e(tag, "SecurityException starting AudioRecord", se)
-            onError("Permission denied: ${se.localizedMessage}")
+            val msg = "Permission denied: ${se.localizedMessage}"
+            LiveDebugLogger.log("Mic error: $msg", LiveDebugLogger.LogLevel.ERROR)
+            onError(msg)
             stopRecording()
         } catch (e: Exception) {
             Log.e(tag, "Exception starting AudioRecord", e)
-            onError("Mic error: ${e.localizedMessage}")
+            val msg = "Mic error: ${e.localizedMessage}"
+            LiveDebugLogger.log("Mic error: $msg", LiveDebugLogger.LogLevel.ERROR)
+            onError(msg)
             stopRecording()
         }
     }
@@ -130,6 +143,9 @@ class AudioRecordManager(private val context: Context) {
     }
 
     fun stopRecording() {
+        if (isRecording) {
+            LiveDebugLogger.log("Microphone recording stopped", LiveDebugLogger.LogLevel.INFO)
+        }
         isRecording = false
         recordingJob?.cancel()
         recordingJob = null

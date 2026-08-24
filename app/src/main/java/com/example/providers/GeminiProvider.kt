@@ -65,7 +65,7 @@ class GeminiProvider : AIProvider {
         listener: GeminiLiveClient.LiveEventListener
     ): GeminiLiveClient {
         val apiKey = getActiveApiKey()
-        val liveModel = "gemini-2.5-flash-native-audio-preview-12-2025"
+        val liveModel = "gemini-3.1-flash-live-preview"
         val liveClient = GeminiLiveClient(apiKey = apiKey, model = liveModel, voiceName = voiceName)
         liveClient.listener = listener
         liveClient.connect(systemInstruction)
@@ -222,7 +222,7 @@ class GeminiProvider : AIProvider {
 
         val client = GeminiLiveClient(
             apiKey = apiKey,
-            model = "gemini-2.5-flash-native-audio-preview-12-2025",
+            model = "gemini-3.1-flash-live-preview",
             voiceName = voiceName
         )
 
