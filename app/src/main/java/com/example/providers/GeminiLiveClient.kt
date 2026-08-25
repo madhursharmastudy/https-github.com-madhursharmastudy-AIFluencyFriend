@@ -5,6 +5,7 @@ import android.util.Log
 import com.example.debug.LiveDebugLogger
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.*
 import okhttp3.*
 import java.util.concurrent.TimeUnit
 
@@ -14,10 +15,12 @@ import java.util.concurrent.TimeUnit
  */
 class GeminiLiveClient(
     private val apiKey: String,
-    private val model: String = "gemini-3.1-flash-live-preview",
+    private val model: String = "gemini-2.5-flash-native-audio-preview-12-2025",
     private val voiceName: String = "Aoede"
 ) {
     private val tag = "GeminiLiveClient"
+    private val clientScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var setupTimeoutJob: Job? = null
 
     interface LiveEventListener {
         fun onConnected()
@@ -108,6 +111,7 @@ class GeminiLiveClient(
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 Log.e(tag, "WebSocket failure: ${t.localizedMessage}", t)
+                setupTimeoutJob?.cancel()
                 isConnected = false
                 isSetupDone = false
                 LiveDebugLogger.setWsStatus("Disconnected")
@@ -150,6 +154,20 @@ class GeminiLiveClient(
         val json = mapAdapter.toJson(fullMessage)
         Log.d(tag, "Sending setup message: $json")
         LiveDebugLogger.log("Setup message sent: $modelName (Voice: $voiceName)", LiveDebugLogger.LogLevel.INFO)
+        
+        // Start 12s setup watchdog to detect unavailable/denied models
+        setupTimeoutJob?.cancel()
+        setupTimeoutJob = clientScope.launch {
+            delay(12_000L)
+            if (!isSetupDone && isConnected) {
+                Log.e(tag, "Setup timeout: setupComplete not received within 12s")
+                val errorMsg = "Model access denied or unavailable — check API key permissions"
+                LiveDebugLogger.log("Setup error: $errorMsg", LiveDebugLogger.LogLevel.ERROR)
+                listener?.onError(errorMsg)
+                disconnect()
+            }
+        }
+
         webSocket?.send(json)
     }
 
@@ -207,6 +225,8 @@ class GeminiLiveClient(
             // 1. Setup complete
             if (root.containsKey("setupComplete")) {
                 Log.i(tag, "Gemini Live Setup Completed!")
+                setupTimeoutJob?.cancel()
+                setupTimeoutJob = null
                 isSetupDone = true
                 LiveDebugLogger.log("Setup complete received from Gemini Live", LiveDebugLogger.LogLevel.SUCCESS)
                 listener?.onSetupComplete()
@@ -215,6 +235,8 @@ class GeminiLiveClient(
 
             // 2. Error message
             if (root.containsKey("error")) {
+                setupTimeoutJob?.cancel()
+                setupTimeoutJob = null
                 val errorObj = root["error"] as? Map<*, *>
                 val msg = errorObj?.get("message") as? String ?: "Unknown Live API error"
                 Log.e(tag, "Gemini Live returned error: $msg")
@@ -277,6 +299,8 @@ class GeminiLiveClient(
 
     fun disconnect() {
         try {
+            setupTimeoutJob?.cancel()
+            setupTimeoutJob = null
             webSocket?.cancel()
             webSocket?.close(1000, "User ended session")
         } catch (e: Exception) {
