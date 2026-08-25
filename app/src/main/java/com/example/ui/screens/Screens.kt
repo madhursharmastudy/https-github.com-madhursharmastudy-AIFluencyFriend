@@ -176,10 +176,18 @@ fun ApiKeyStatusBanner(
 fun ApiKeySetupDialog(viewModel: MainViewModel) {
     val inputKey by viewModel.apiKeyInput.collectAsState()
     val inputModel by viewModel.modelInput.collectAsState()
-    val isTesting by viewModel.isTestingApiKey.collectAsState()
-    val testMessage by viewModel.apiKeyTestMessage.collectAsState()
-    val testSuccess by viewModel.apiKeyTestSuccess.collectAsState()
-    var passwordVisible by remember { mutableStateOf(false) }
+    val isTestingGemini by viewModel.isTestingApiKey.collectAsState()
+    val geminiTestMessage by viewModel.apiKeyTestMessage.collectAsState()
+    val geminiTestSuccess by viewModel.apiKeyTestSuccess.collectAsState()
+
+    val inworldKey by viewModel.inworldApiKeyInput.collectAsState()
+    val selectedVoiceProvider by viewModel.selectedVoiceProvider.collectAsState()
+    val isTestingInworld by viewModel.isTestingInworldApiKey.collectAsState()
+    val inworldTestMessage by viewModel.inworldApiKeyTestMessage.collectAsState()
+    val inworldTestSuccess by viewModel.inworldApiKeyTestSuccess.collectAsState()
+
+    var geminiPasswordVisible by remember { mutableStateOf(false) }
+    var inworldPasswordVisible by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
 
     AlertDialog(
@@ -194,7 +202,7 @@ fun ApiKeySetupDialog(viewModel: MainViewModel) {
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "Gemini API Configuration",
+                    text = "AI & Voice Configuration",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     color = Color(0xFF1D1B20)
@@ -207,12 +215,63 @@ fun ApiKeySetupDialog(viewModel: MainViewModel) {
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
             ) {
+                // 1. VOICE PROVIDER SELECTOR
                 Text(
-                    text = "Enter your Google Gemini API key. It is saved directly and permanently on your device.",
-                    fontSize = 13.sp,
+                    text = "VOICE PROVIDER (LIVE AUDIO)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF6750A4)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Choose the engine that powers real-time bidirectional voice conversation. Text chat always uses Gemini API.",
+                    fontSize = 12.sp,
                     color = Color(0xFF49454F)
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("Gemini", "Inworld").forEach { provider ->
+                        val isSelected = selectedVoiceProvider.equals(provider, ignoreCase = true)
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { viewModel.selectedVoiceProvider.value = provider },
+                            label = {
+                                Text(
+                                    text = if (provider == "Gemini") "Google Gemini Live" else "Inworld AI Realtime",
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFEADDFF),
+                                selectedLabelColor = Color(0xFF21005D)
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+                Divider(color = Color(0xFFCAC4D0).copy(alpha = 0.5f))
                 Spacer(modifier = Modifier.height(14.dp))
+
+                // 2. GEMINI API KEY SECTION
+                Text(
+                    text = "GEMINI API KEY",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF6750A4)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Powers text conversations, companion intelligence, and Gemini Live voice.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF49454F)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
 
                 OutlinedTextField(
                     value = inputKey,
@@ -220,14 +279,14 @@ fun ApiKeySetupDialog(viewModel: MainViewModel) {
                     label = { Text("Gemini API Key") },
                     placeholder = { Text("AIzaSy...") },
                     singleLine = true,
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    visualTransformation = if (geminiPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (inputKey.isNotEmpty()) {
-                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                IconButton(onClick = { geminiPasswordVisible = !geminiPasswordVisible }) {
                                     Icon(
-                                        imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = if (passwordVisible) "Hide key" else "Show key",
+                                        imageVector = if (geminiPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (geminiPasswordVisible) "Hide key" else "Show key",
                                         tint = Color(0xFF6750A4)
                                     )
                                 }
@@ -254,15 +313,15 @@ fun ApiKeySetupDialog(viewModel: MainViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "SELECT GEMINI MODEL",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF6750A4)
+                    text = "GEMINI TEXT MODEL",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF49454F)
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 val availableModels = listOf(
                     "gemini-2.5-flash" to "Fast & Recommended",
@@ -276,12 +335,12 @@ fun ApiKeySetupDialog(viewModel: MainViewModel) {
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    availableModels.forEach { (mCode, mLabel) ->
+                    availableModels.forEach { (mCode, _) ->
                         val isSelected = inputModel == mCode
                         FilterChip(
                             selected = isSelected,
                             onClick = { viewModel.modelInput.value = mCode },
-                            label = { Text(mCode) },
+                            label = { Text(mCode, fontSize = 12.sp) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = Color(0xFFEADDFF),
                                 selectedLabelColor = Color(0xFF21005D)
@@ -290,57 +349,164 @@ fun ApiKeySetupDialog(viewModel: MainViewModel) {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Test Connection Button & Status Output
+                // Gemini Test Connection Button
                 OutlinedButton(
                     onClick = { viewModel.testGeminiApiKey(inputKey, inputModel) },
-                    enabled = !isTesting && inputKey.isNotBlank(),
+                    enabled = !isTestingGemini && inputKey.isNotBlank(),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    if (isTesting) {
+                    if (isTestingGemini) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp,
                             color = Color(0xFF6750A4)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Verifying...")
+                        Text("Testing Gemini...")
                     } else {
                         Icon(
                             imageVector = Icons.Default.CloudDone,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Test API Key Connection")
+                        Text("Test Gemini Connection", fontSize = 13.sp)
                     }
                 }
 
-                if (testMessage != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                if (geminiTestMessage != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(
-                                color = if (testSuccess == true) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                                color = if (geminiTestSuccess == true) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
                                 shape = RoundedCornerShape(8.dp)
                             )
-                            .padding(10.dp)
+                            .padding(8.dp)
                     ) {
                         Text(
-                            text = testMessage ?: "",
-                            fontSize = 12.sp,
+                            text = geminiTestMessage ?: "",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
-                            color = if (testSuccess == true) Color(0xFF2E7D32) else Color(0xFFC62828)
+                            color = if (geminiTestSuccess == true) Color(0xFF2E7D32) else Color(0xFFC62828)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(18.dp))
+                Divider(color = Color(0xFFCAC4D0).copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // 3. INWORLD AI KEY SECTION
                 Text(
-                    text = "Get a free Gemini API key at ai.google.dev / aistudio.google.com",
+                    text = "INWORLD API KEY",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF6750A4)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Powers Inworld AI ultra low-latency speech-to-speech companion conversation.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF49454F)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = inworldKey,
+                    onValueChange = { viewModel.inworldApiKeyInput.value = it },
+                    label = { Text("Inworld API Key") },
+                    placeholder = { Text("Base64 API Key or key:secret") },
+                    singleLine = true,
+                    visualTransformation = if (inworldPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (inworldKey.isNotEmpty()) {
+                                IconButton(onClick = { inworldPasswordVisible = !inworldPasswordVisible }) {
+                                    Icon(
+                                        imageVector = if (inworldPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (inworldPasswordVisible) "Hide key" else "Show key",
+                                        tint = Color(0xFF6750A4)
+                                    )
+                                }
+                            }
+                            IconButton(onClick = {
+                                val clipText = clipboardManager.getText()?.text ?: ""
+                                if (clipText.isNotEmpty()) {
+                                    viewModel.inworldApiKeyInput.value = clipText.trim()
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentPaste,
+                                    contentDescription = "Paste from clipboard",
+                                    tint = Color(0xFF6750A4)
+                                )
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF6750A4),
+                        unfocusedBorderColor = Color(0xFFCAC4D0)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Inworld Test Connection Button
+                OutlinedButton(
+                    onClick = { viewModel.testInworldApiKey(inworldKey) },
+                    enabled = !isTestingInworld && inworldKey.isNotBlank(),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isTestingInworld) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = Color(0xFF6750A4)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Testing Inworld...")
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.CloudDone,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Test Inworld Connection", fontSize = 13.sp)
+                    }
+                }
+
+                if (inworldTestMessage != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = if (inworldTestSuccess == true) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = inworldTestMessage ?: "",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (inworldTestSuccess == true) Color(0xFF2E7D32) else Color(0xFFC62828)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Get your Inworld key from studio.inworld.ai",
                     fontSize = 11.sp,
                     color = Color(0xFF79747E)
                 )
@@ -349,12 +515,17 @@ fun ApiKeySetupDialog(viewModel: MainViewModel) {
         confirmButton = {
             Button(
                 onClick = {
-                    viewModel.saveGeminiApiKey(inputKey, inputModel)
+                    viewModel.saveAllApiKeySettings(
+                        inputKey,
+                        inputModel,
+                        inworldKey,
+                        selectedVoiceProvider
+                    )
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6750A4)),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Save Key Forever", fontWeight = FontWeight.Bold)
+                Text("Save Settings", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1296,8 +1467,9 @@ fun ChatScreen(viewModel: MainViewModel) {
                     textAlign = TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(6.dp))
+                val currentProviderLabel = if (settings?.voiceProvider.equals("Inworld", true)) "Inworld AI" else "Gemini Live"
                 Text(
-                    text = "Aria • ${settings?.selectedPersonality ?: "Friendly"} Companion",
+                    text = "Aria • ${settings?.selectedPersonality ?: "Friendly"} • $currentProviderLabel",
                     fontSize = 14.sp,
                     color = Color.White.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center
@@ -2288,9 +2460,12 @@ fun ProfileScreen(viewModel: MainViewModel) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Google Gemini API Configuration Card
+        // AI & Voice Engine Configuration Card
         val isConfigured by viewModel.isApiKeyConfigured.collectAsState()
+        val isInworldConfigured by viewModel.isInworldKeyConfigured.collectAsState()
+        val currentVoiceProvider by viewModel.selectedVoiceProvider.collectAsState()
         val currentSettingsKey = settings?.geminiApiKey ?: ""
+        val currentInworldKey = settings?.inworldApiKey ?: ""
         val currentSettingsModel = settings?.selectedModel ?: "gemini-2.5-flash"
 
         Card(
@@ -2305,7 +2480,7 @@ fun ProfileScreen(viewModel: MainViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "GEMINI AI CONFIGURATION",
+                        text = "AI & VOICE CONFIGURATION",
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
                         color = Color(0xFF6750A4)
@@ -2319,7 +2494,7 @@ fun ProfileScreen(viewModel: MainViewModel) {
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = if (isConfigured) "● Key Active" else "● Key Missing",
+                            text = if (isConfigured) "● Ready" else "● Setup Required",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isConfigured) Color(0xFF2E7D32) else Color(0xFFE65100)
@@ -2327,22 +2502,120 @@ fun ProfileScreen(viewModel: MainViewModel) {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
+                // Voice Provider Selector
                 Text(
-                    text = "Model: $currentSettingsModel",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF1D1B20)
-                )
-
-                Text(
-                    text = if (currentSettingsKey.isNotEmpty()) "Key: ••••••••••••${currentSettingsKey.takeLast(4)}" else "No custom key saved. Tap below to configure.",
-                    fontSize = 12.sp,
+                    text = "ACTIVE VOICE PROVIDER",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
                     color = Color(0xFF49454F)
                 )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("Gemini", "Inworld").forEach { provider ->
+                        val isSel = currentVoiceProvider.equals(provider, ignoreCase = true)
+                        FilterChip(
+                            selected = isSel,
+                            onClick = { viewModel.updateVoiceProvider(provider) },
+                            label = {
+                                Text(
+                                    text = if (provider == "Gemini") "Google Gemini" else "Inworld AI",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFEADDFF),
+                                selectedLabelColor = Color(0xFF21005D)
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
+                Divider(color = Color(0xFFCAC4D0).copy(alpha = 0.4f))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Gemini Key Summary
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Gemini AI (Chat & Live)",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = Color(0xFF1D1B20)
+                        )
+                        Text(
+                            text = if (currentSettingsKey.isNotEmpty()) "Key: ••••••••${currentSettingsKey.takeLast(4)} ($currentSettingsModel)" else "No key configured",
+                            fontSize = 11.sp,
+                            color = Color(0xFF49454F)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = if (isConfigured) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (isConfigured) "Active" else "Missing",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isConfigured) Color(0xFF2E7D32) else Color(0xFFC62828)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Inworld Key Summary
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Inworld AI (Voice Engine)",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = Color(0xFF1D1B20)
+                        )
+                        Text(
+                            text = if (currentInworldKey.isNotEmpty()) "Key: ••••••••${currentInworldKey.takeLast(4)}" else "No key configured",
+                            fontSize = 11.sp,
+                            color = Color(0xFF49454F)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = if (isInworldConfigured || currentInworldKey.isNotEmpty()) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (isInworldConfigured || currentInworldKey.isNotEmpty()) "Active" else "Not Set",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isInworldConfigured || currentInworldKey.isNotEmpty()) Color(0xFF2E7D32) else Color(0xFF79747E)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Button(
                     onClick = { viewModel.openApiKeyDialog() },
@@ -2357,7 +2630,7 @@ fun ProfileScreen(viewModel: MainViewModel) {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isConfigured) "Update / Test Gemini Key" else "Set Gemini API Key",
+                        text = "Configure API Keys & Providers",
                         fontWeight = FontWeight.Bold
                     )
                 }

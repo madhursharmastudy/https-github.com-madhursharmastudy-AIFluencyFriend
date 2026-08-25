@@ -16,6 +16,7 @@ import com.example.memory.MemoryRanker
 import com.example.providers.AIProvider
 import com.example.providers.GeminiLiveClient
 import com.example.providers.GeminiProvider
+import com.example.providers.InworldLiveClient
 import com.example.relationship.RelationshipManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,7 +66,8 @@ class ConversationManager(
     private val _liveErrorMessage = MutableStateFlow<String?>(null)
     val liveErrorMessage: StateFlow<String?> = _liveErrorMessage.asStateFlow()
 
-    private var activeLiveClient: GeminiLiveClient? = null
+    private var activeGeminiClient: GeminiLiveClient? = null
+    private var activeInworldClient: InworldLiveClient? = null
     private var sessionStartTime: Long = 0
     private var currentModelTurnTranscript = StringBuilder()
     private var isLiveStreamingActive = false
@@ -215,113 +217,218 @@ class ConversationManager(
             }
         }
 
-        // 3. Connect Gemini Live Client
-        val geminiProv = aiProvider as? GeminiProvider
-        val apiKey = geminiProv?.getActiveApiKey() ?: ""
-        if (apiKey.isBlank()) {
-            onError("Gemini API Key is not configured. Please add your key in Settings.")
-            return@withContext
-        }
+        // 3. Connect Live Client based on active Voice Provider setting
+        val settings = database.settingsDao().getSettings()
+        val prefs = context.getSharedPreferences("ai_fluency_prefs", Context.MODE_PRIVATE)
+        val voiceProvider = settings?.voiceProvider?.ifEmpty { null } 
+            ?: prefs.getString("voice_provider", "Gemini") ?: "Gemini"
 
         onVoiceStateChanged("THINKING")
         isLiveStreamingActive = true
         currentModelTurnTranscript.clear()
         startResponseWatchdog(onVoiceStateChanged)
 
-        val liveClient = GeminiLiveClient(
-            apiKey = apiKey,
-            model = "gemini-2.5-flash-native-audio-preview-12-2025",
-            voiceName = geminiProv?.voiceName ?: "Aoede"
-        )
+        if (voiceProvider.equals("Inworld", ignoreCase = true)) {
+            // Inworld AI Realtime Connection
+            val inworldApiKey = settings?.inworldApiKey?.ifEmpty { null }
+                ?: prefs.getString("inworld_api_key", "") ?: ""
 
-        liveClient.listener = object : GeminiLiveClient.LiveEventListener {
-            override fun onConnected() {
-                Log.i(tag, "Gemini Live WebSocket Connected")
+            if (inworldApiKey.isBlank()) {
+                onError("Inworld API Key is not configured. Please add your key in Settings.")
+                return@withContext
             }
 
-            override fun onSetupComplete() {
-                Log.i(tag, "Gemini Live Setup Complete -> starting microphone streaming")
-                cancelResponseWatchdog()
-                onVoiceStateChanged("LISTENING")
+            val inworldClient = InworldLiveClient(
+                apiKey = inworldApiKey,
+                voice = "alloy"
+            )
 
-                // Start recording microphone audio (16kHz 16-bit Mono)
-                audioRecordManager.startRecording(
-                    scope = coroutineScope,
-                    onAudioChunk = { chunkBytes, rmsLevel ->
-                        _liveAudioLevel.value = rmsLevel
-                        if (isLiveStreamingActive) {
-                            liveClient.sendAudioChunk(chunkBytes)
-                            // Feed live audio level to voice emotion analyzer
-                            submitEmotionFactors(
-                                isSmile = false,
-                                isFurrowed = false,
-                                isEyesClosed = false,
-                                volumeVariance = rmsLevel * 1000f,
-                                pitchHz = 160f + (rmsLevel * 80f),
-                                hesitations = 0
-                            )
-                        }
-                    },
-                    onError = { micError ->
-                        Log.e(tag, "Mic error: $micError")
-                        cancelResponseWatchdog()
-                        onError(micError)
-                        _liveErrorMessage.value = micError
-                    }
-                )
-            }
-
-            override fun onAudioChunkReceived(audioData: ByteArray) {
-                cancelResponseWatchdog()
-                audioTrackPlayer.enqueueAudio(audioData)
-            }
-
-            override fun onTranscriptChunkReceived(text: String) {
-                cancelResponseWatchdog()
-                currentModelTurnTranscript.append(text)
-                // Update live transcript subtitle in message list
-                updateLiveCompanionTranscript(sessionId, currentModelTurnTranscript.toString())
-            }
-
-            override fun onTurnComplete() {
-                Log.d(tag, "Companion turn complete")
-                cancelResponseWatchdog()
-                val fullTranscript = currentModelTurnTranscript.toString().trim()
-                if (fullTranscript.isNotEmpty()) {
-                    commitCompletedCompanionMessage(sessionId, fullTranscript)
+            inworldClient.listener = object : InworldLiveClient.LiveEventListener {
+                override fun onConnected() {
+                    Log.i(tag, "Inworld Live WebSocket Connected")
                 }
-                currentModelTurnTranscript.clear()
-            }
 
-            override fun onInterrupted() {
-                Log.d(tag, "Companion speech interrupted by user voice")
-                cancelResponseWatchdog()
-                audioTrackPlayer.stopAndFlush()
-                currentModelTurnTranscript.clear()
-                onVoiceStateChanged("LISTENING")
-            }
+                override fun onSetupComplete() {
+                    Log.i(tag, "Inworld Live Setup Complete -> starting microphone streaming")
+                    cancelResponseWatchdog()
+                    onVoiceStateChanged("LISTENING")
 
-            override fun onError(error: String) {
-                Log.e(tag, "Gemini Live Error: $error")
-                cancelResponseWatchdog()
-                _liveErrorMessage.value = error
-                onError(error)
-                stopLiveVoiceSession()
-                onVoiceStateChanged("IDLE")
-            }
+                    audioRecordManager.startRecording(
+                        scope = coroutineScope,
+                        onAudioChunk = { chunkBytes, rmsLevel ->
+                            _liveAudioLevel.value = rmsLevel
+                            if (isLiveStreamingActive) {
+                                inworldClient.sendAudioChunk(chunkBytes)
+                                submitEmotionFactors(
+                                    isSmile = false,
+                                    isFurrowed = false,
+                                    isEyesClosed = false,
+                                    volumeVariance = rmsLevel * 1000f,
+                                    pitchHz = 160f + (rmsLevel * 80f),
+                                    hesitations = 0
+                                )
+                            }
+                        },
+                        onError = { micError ->
+                            Log.e(tag, "Mic error: $micError")
+                            cancelResponseWatchdog()
+                            onError(micError)
+                            _liveErrorMessage.value = micError
+                        }
+                    )
+                }
 
-            override fun onDisconnected(reason: String) {
-                Log.i(tag, "Gemini Live Disconnected: $reason")
-                cancelResponseWatchdog()
-                if (isLiveStreamingActive) {
+                override fun onAudioChunkReceived(audioData: ByteArray) {
+                    cancelResponseWatchdog()
+                    audioTrackPlayer.enqueueAudio(audioData)
+                }
+
+                override fun onTranscriptChunkReceived(text: String) {
+                    cancelResponseWatchdog()
+                    currentModelTurnTranscript.append(text)
+                    updateLiveCompanionTranscript(sessionId, currentModelTurnTranscript.toString())
+                }
+
+                override fun onTurnComplete() {
+                    Log.d(tag, "Inworld Companion turn complete")
+                    cancelResponseWatchdog()
+                    val fullTranscript = currentModelTurnTranscript.toString().trim()
+                    if (fullTranscript.isNotEmpty()) {
+                        commitCompletedCompanionMessage(sessionId, fullTranscript)
+                    }
+                    currentModelTurnTranscript.clear()
+                }
+
+                override fun onInterrupted() {
+                    Log.d(tag, "Inworld Companion speech interrupted by user voice")
+                    cancelResponseWatchdog()
+                    audioTrackPlayer.stopAndFlush()
+                    currentModelTurnTranscript.clear()
+                    onVoiceStateChanged("LISTENING")
+                }
+
+                override fun onError(error: String) {
+                    Log.e(tag, "Inworld Live Error: $error")
+                    cancelResponseWatchdog()
+                    _liveErrorMessage.value = error
+                    onError(error)
                     stopLiveVoiceSession()
                     onVoiceStateChanged("IDLE")
                 }
-            }
-        }
 
-        activeLiveClient = liveClient
-        liveClient.connect(systemPrompt)
+                override fun onDisconnected(reason: String) {
+                    Log.i(tag, "Inworld Live Disconnected: $reason")
+                    cancelResponseWatchdog()
+                    if (isLiveStreamingActive) {
+                        stopLiveVoiceSession()
+                        onVoiceStateChanged("IDLE")
+                    }
+                }
+            }
+
+            activeInworldClient = inworldClient
+            inworldClient.connect(systemPrompt)
+        } else {
+            // Google Gemini Multimodal Live Connection
+            val geminiProv = aiProvider as? GeminiProvider
+            val apiKey = geminiProv?.getActiveApiKey() ?: ""
+            if (apiKey.isBlank()) {
+                onError("Gemini API Key is not configured. Please add your key in Settings.")
+                return@withContext
+            }
+
+            val liveClient = GeminiLiveClient(
+                apiKey = apiKey,
+                model = "gemini-2.5-flash-native-audio-preview-12-2025",
+                voiceName = geminiProv?.voiceName ?: "Aoede"
+            )
+
+            liveClient.listener = object : GeminiLiveClient.LiveEventListener {
+                override fun onConnected() {
+                    Log.i(tag, "Gemini Live WebSocket Connected")
+                }
+
+                override fun onSetupComplete() {
+                    Log.i(tag, "Gemini Live Setup Complete -> starting microphone streaming")
+                    cancelResponseWatchdog()
+                    onVoiceStateChanged("LISTENING")
+
+                    audioRecordManager.startRecording(
+                        scope = coroutineScope,
+                        onAudioChunk = { chunkBytes, rmsLevel ->
+                            _liveAudioLevel.value = rmsLevel
+                            if (isLiveStreamingActive) {
+                                liveClient.sendAudioChunk(chunkBytes)
+                                submitEmotionFactors(
+                                    isSmile = false,
+                                    isFurrowed = false,
+                                    isEyesClosed = false,
+                                    volumeVariance = rmsLevel * 1000f,
+                                    pitchHz = 160f + (rmsLevel * 80f),
+                                    hesitations = 0
+                                )
+                            }
+                        },
+                        onError = { micError ->
+                            Log.e(tag, "Mic error: $micError")
+                            cancelResponseWatchdog()
+                            onError(micError)
+                            _liveErrorMessage.value = micError
+                        }
+                    )
+                }
+
+                override fun onAudioChunkReceived(audioData: ByteArray) {
+                    cancelResponseWatchdog()
+                    audioTrackPlayer.enqueueAudio(audioData)
+                }
+
+                override fun onTranscriptChunkReceived(text: String) {
+                    cancelResponseWatchdog()
+                    currentModelTurnTranscript.append(text)
+                    updateLiveCompanionTranscript(sessionId, currentModelTurnTranscript.toString())
+                }
+
+                override fun onTurnComplete() {
+                    Log.d(tag, "Companion turn complete")
+                    cancelResponseWatchdog()
+                    val fullTranscript = currentModelTurnTranscript.toString().trim()
+                    if (fullTranscript.isNotEmpty()) {
+                        commitCompletedCompanionMessage(sessionId, fullTranscript)
+                    }
+                    currentModelTurnTranscript.clear()
+                }
+
+                override fun onInterrupted() {
+                    Log.d(tag, "Companion speech interrupted by user voice")
+                    cancelResponseWatchdog()
+                    audioTrackPlayer.stopAndFlush()
+                    currentModelTurnTranscript.clear()
+                    onVoiceStateChanged("LISTENING")
+                }
+
+                override fun onError(error: String) {
+                    Log.e(tag, "Gemini Live Error: $error")
+                    cancelResponseWatchdog()
+                    _liveErrorMessage.value = error
+                    onError(error)
+                    stopLiveVoiceSession()
+                    onVoiceStateChanged("IDLE")
+                }
+
+                override fun onDisconnected(reason: String) {
+                    Log.i(tag, "Gemini Live Disconnected: $reason")
+                    cancelResponseWatchdog()
+                    if (isLiveStreamingActive) {
+                        stopLiveVoiceSession()
+                        onVoiceStateChanged("IDLE")
+                    }
+                }
+            }
+
+            activeGeminiClient = liveClient
+            liveClient.connect(systemPrompt)
+        }
     }
 
     private fun updateLiveCompanionTranscript(sessionId: String, transcript: String) {
@@ -365,8 +472,10 @@ class ConversationManager(
         audioRecordManager.stopRecording()
         audioTrackPlayer.stopAndFlush()
         audioTrackPlayer.release()
-        activeLiveClient?.disconnect()
-        activeLiveClient = null
+        activeGeminiClient?.disconnect()
+        activeGeminiClient = null
+        activeInworldClient?.disconnect()
+        activeInworldClient = null
         _liveAudioLevel.value = 0f
     }
 

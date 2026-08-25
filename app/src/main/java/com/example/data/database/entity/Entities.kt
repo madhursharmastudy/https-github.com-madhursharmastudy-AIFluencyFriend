@@ -155,5 +155,7 @@ data class Settings(
     val englishCorrectionEnabled: Boolean,
     val notificationsEnabled: Boolean,
     val geminiApiKey: String = "",
-    val selectedModel: String = "gemini-2.5-flash"
+    val selectedModel: String = "gemini-2.5-flash",
+    val inworldApiKey: String = "",
+    val voiceProvider: String = "Gemini"
 )

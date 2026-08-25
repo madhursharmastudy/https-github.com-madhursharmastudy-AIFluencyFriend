@@ -11,6 +11,7 @@ import com.example.data.database.entity.*
 import com.example.conversation.ConversationManager
 import com.example.english.EnglishEngine
 import com.example.providers.GeminiProvider
+import com.example.providers.InworldLiveClient
 import com.example.safety.SafetyGuidanceEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -55,6 +56,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isTestingApiKey = MutableStateFlow(false)
     val apiKeyTestMessage = MutableStateFlow<String?>(null)
     val apiKeyTestSuccess = MutableStateFlow<Boolean?>(null)
+
+    // Inworld Voice Provider & Key State
+    val inworldApiKeyInput = MutableStateFlow("")
+    val selectedVoiceProvider = MutableStateFlow("Gemini") // "Gemini" or "Inworld"
+    val isTestingInworldApiKey = MutableStateFlow(false)
+    val inworldApiKeyTestMessage = MutableStateFlow<String?>(null)
+    val inworldApiKeyTestSuccess = MutableStateFlow<Boolean?>(null)
+    private val _isInworldKeyConfigured = MutableStateFlow(false)
+    val isInworldKeyConfigured: StateFlow<Boolean> = _isInworldKeyConfigured.asStateFlow()
 
     // Current Active Setup
     val userProfile = database.userProfileDao().getUserProfile()
@@ -114,9 +124,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isApiKeyConfigured: StateFlow<Boolean> = _isApiKeyConfigured.asStateFlow()
 
     init {
-        // Load initial API key from SharedPreferences if available
+        // Load initial API keys and voice provider from SharedPreferences if available
         val savedKey = prefs.getString("gemini_api_key", "") ?: ""
         val savedModel = prefs.getString("gemini_model", "gemini-2.5-flash") ?: "gemini-2.5-flash"
+        val savedInworldKey = prefs.getString("inworld_api_key", "") ?: ""
+        val savedVoiceProvider = prefs.getString("voice_provider", "Gemini") ?: "Gemini"
+
         if (savedKey.isNotEmpty()) {
             geminiProvider.customApiKey = savedKey
             geminiProvider.customModelName = savedModel
@@ -127,6 +140,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val buildKey = geminiProvider.getActiveApiKey()
             _isApiKeyConfigured.value = buildKey.isNotEmpty()
         }
+
+        if (savedInworldKey.isNotEmpty()) {
+            inworldApiKeyInput.value = savedInworldKey
+            _isInworldKeyConfigured.value = true
+        }
+        selectedVoiceProvider.value = savedVoiceProvider
 
         // Collect database settings and keep provider in sync
         viewModelScope.launch {
@@ -141,6 +160,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         geminiProvider.customModelName = settings.selectedModel
                         modelInput.value = settings.selectedModel
                         prefs.edit().putString("gemini_model", settings.selectedModel).apply()
+                    }
+                    if (settings.inworldApiKey.isNotEmpty()) {
+                        inworldApiKeyInput.value = settings.inworldApiKey
+                        prefs.edit().putString("inworld_api_key", settings.inworldApiKey).apply()
+                        _isInworldKeyConfigured.value = true
+                    }
+                    if (settings.voiceProvider.isNotEmpty()) {
+                        selectedVoiceProvider.value = settings.voiceProvider
+                        prefs.edit().putString("voice_provider", settings.voiceProvider).apply()
                     }
                     _isApiKeyConfigured.value = geminiProvider.isKeyConfigured()
                 }
@@ -172,10 +200,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openApiKeyDialog() {
         apiKeyTestMessage.value = null
         apiKeyTestSuccess.value = null
+        inworldApiKeyTestMessage.value = null
+        inworldApiKeyTestSuccess.value = null
+
         val currentKey = geminiProvider.customApiKey ?: prefs.getString("gemini_api_key", "") ?: ""
         apiKeyInput.value = currentKey
         val currentModel = geminiProvider.customModelName
         modelInput.value = currentModel
+
+        val currentInworldKey = prefs.getString("inworld_api_key", "") ?: appSettings.value?.inworldApiKey ?: ""
+        inworldApiKeyInput.value = currentInworldKey
+
+        val currentVoiceProv = prefs.getString("voice_provider", "Gemini") ?: appSettings.value?.voiceProvider ?: "Gemini"
+        selectedVoiceProvider.value = currentVoiceProv
+
         showApiKeyDialog.value = true
     }
 
@@ -183,29 +221,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         showApiKeyDialog.value = false
         apiKeyTestMessage.value = null
         apiKeyTestSuccess.value = null
+        inworldApiKeyTestMessage.value = null
+        inworldApiKeyTestSuccess.value = null
     }
 
-    fun saveGeminiApiKey(key: String, model: String) {
-        val cleanKey = key.trim()
-        val cleanModel = model.trim().ifEmpty { "gemini-2.5-flash" }
+    fun saveAllApiKeySettings(
+        geminiKey: String,
+        geminiModel: String,
+        inworldKey: String,
+        voiceProvider: String
+    ) {
+        val cleanGeminiKey = geminiKey.trim()
+        val cleanGeminiModel = geminiModel.trim().ifEmpty { "gemini-2.5-flash" }
+        val cleanInworldKey = inworldKey.trim()
+        val cleanVoiceProvider = voiceProvider.trim().ifEmpty { "Gemini" }
+
         viewModelScope.launch(Dispatchers.IO) {
-            // Save to SharedPreferences for permanent local persistence
             prefs.edit()
-                .putString("gemini_api_key", cleanKey)
-                .putString("gemini_model", cleanModel)
+                .putString("gemini_api_key", cleanGeminiKey)
+                .putString("gemini_model", cleanGeminiModel)
+                .putString("inworld_api_key", cleanInworldKey)
+                .putString("voice_provider", cleanVoiceProvider)
                 .apply()
 
-            geminiProvider.customApiKey = cleanKey
-            geminiProvider.customModelName = cleanModel
+            geminiProvider.customApiKey = cleanGeminiKey
+            geminiProvider.customModelName = cleanGeminiModel
             _isApiKeyConfigured.value = geminiProvider.isKeyConfigured()
+            _isInworldKeyConfigured.value = cleanInworldKey.isNotEmpty()
+            selectedVoiceProvider.value = cleanVoiceProvider
 
             // Save to Room Settings Table
             val currentPh = appSettings.value?.userId ?: "user_default"
             val existing = database.settingsDao().getSettings()
             if (existing != null) {
                 val updated = existing.copy(
-                    geminiApiKey = cleanKey,
-                    selectedModel = cleanModel
+                    geminiApiKey = cleanGeminiKey,
+                    selectedModel = cleanGeminiModel,
+                    inworldApiKey = cleanInworldKey,
+                    voiceProvider = cleanVoiceProvider
                 )
                 database.settingsDao().insertSettings(updated)
             } else {
@@ -217,12 +270,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     faceEmotionEnabled = true,
                     englishCorrectionEnabled = true,
                     notificationsEnabled = true,
-                    geminiApiKey = cleanKey,
-                    selectedModel = cleanModel
+                    geminiApiKey = cleanGeminiKey,
+                    selectedModel = cleanGeminiModel,
+                    inworldApiKey = cleanInworldKey,
+                    voiceProvider = cleanVoiceProvider
                 )
                 database.settingsDao().insertSettings(newSettings)
             }
             showApiKeyDialog.value = false
+        }
+    }
+
+    fun saveGeminiApiKey(key: String, model: String) {
+        val currentInworld = inworldApiKeyInput.value
+        val currentVoiceProv = selectedVoiceProvider.value
+        saveAllApiKeySettings(key, model, currentInworld, currentVoiceProv)
+    }
+
+    fun updateVoiceProvider(provider: String) {
+        val cleanProvider = provider.trim().ifEmpty { "Gemini" }
+        selectedVoiceProvider.value = cleanProvider
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.edit().putString("voice_provider", cleanProvider).apply()
+            val existing = database.settingsDao().getSettings()
+            if (existing != null) {
+                database.settingsDao().insertSettings(existing.copy(voiceProvider = cleanProvider))
+            }
         }
     }
 
@@ -231,7 +304,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val cleanModel = model.trim().ifEmpty { "gemini-2.5-flash" }
         if (cleanKey.isEmpty()) {
             apiKeyTestSuccess.value = false
-            apiKeyTestMessage.value = "Please enter an API Key first."
+            apiKeyTestMessage.value = "Please enter a Gemini API Key first."
             return
         }
 
@@ -248,6 +321,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }.onFailure { err ->
                 apiKeyTestSuccess.value = false
                 apiKeyTestMessage.value = "Verification failed: ${err.message}"
+            }
+        }
+    }
+
+    fun testInworldApiKey(key: String) {
+        val cleanKey = key.trim()
+        if (cleanKey.isEmpty()) {
+            inworldApiKeyTestSuccess.value = false
+            inworldApiKeyTestMessage.value = "Please enter an Inworld API Key first."
+            return
+        }
+
+        viewModelScope.launch {
+            isTestingInworldApiKey.value = true
+            inworldApiKeyTestMessage.value = "Testing connection with Inworld AI..."
+            inworldApiKeyTestSuccess.value = null
+
+            val result = InworldLiveClient.testConnection(cleanKey)
+            isTestingInworldApiKey.value = false
+            result.onSuccess { msg ->
+                inworldApiKeyTestSuccess.value = true
+                inworldApiKeyTestMessage.value = msg
+            }.onFailure { err ->
+                inworldApiKeyTestSuccess.value = false
+                inworldApiKeyTestMessage.value = "Verification failed: ${err.message}"
             }
         }
     }
