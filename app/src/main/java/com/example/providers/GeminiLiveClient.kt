@@ -83,7 +83,7 @@ class GeminiLiveClient(
                 Log.i(tag, "WebSocket opened successfully")
                 isConnected = true
                 LiveDebugLogger.setWsStatus("Connected")
-                LiveDebugLogger.log("WebSocket opened (HTTP ${response.code})", LiveDebugLogger.LogLevel.SUCCESS)
+                LiveDebugLogger.log("WebSocket opened (HTTP ${response.code}, msg='${response.message}')", LiveDebugLogger.LogLevel.SUCCESS)
                 listener?.onConnected()
 
                 // Send BidiGenerateContentSetup message
@@ -96,7 +96,8 @@ class GeminiLiveClient(
 
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {
                 Log.i(tag, "WebSocket closing: code=$code, reason=$reason")
-                LiveDebugLogger.log("WebSocket closing: code=$code, reason=$reason", LiveDebugLogger.LogLevel.WARN)
+                val reasonText = if (reason.isBlank()) "<empty>" else reason
+                LiveDebugLogger.log("WebSocket closing: code=$code, reason='$reasonText'", LiveDebugLogger.LogLevel.WARN)
                 ws.close(code, reason)
             }
 
@@ -105,8 +106,9 @@ class GeminiLiveClient(
                 isConnected = false
                 isSetupDone = false
                 LiveDebugLogger.setWsStatus("Disconnected")
-                LiveDebugLogger.log("WebSocket closed: code=$code, reason=$reason", LiveDebugLogger.LogLevel.WARN)
-                listener?.onDisconnected(reason)
+                val reasonText = if (reason.isBlank()) "<empty>" else reason
+                LiveDebugLogger.log("WebSocket closed: code=$code, reason='$reasonText'", LiveDebugLogger.LogLevel.WARN)
+                listener?.onDisconnected("code=$code, reason='$reasonText'")
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
@@ -115,13 +117,15 @@ class GeminiLiveClient(
                 isConnected = false
                 isSetupDone = false
                 LiveDebugLogger.setWsStatus("Disconnected")
+                val respBody = if (response != null) {
+                    try { response.body?.string() } catch (_: Exception) { null }
+                } else null
                 val errorMsg = if (response != null) {
-                    val body = try { response.body?.string() } catch (_: Exception) { null }
-                    "Gemini Live error (HTTP ${response.code}): ${body ?: t.localizedMessage}"
+                    "WebSocket failure (HTTP ${response.code} ${response.message}): ${respBody ?: t.localizedMessage ?: t.javaClass.simpleName}"
                 } else {
-                    t.localizedMessage ?: "Connection error to Gemini Live API"
+                    "WebSocket failure: ${t.javaClass.simpleName} - ${t.localizedMessage ?: "Connection error"}"
                 }
-                LiveDebugLogger.log("WebSocket failure: $errorMsg", LiveDebugLogger.LogLevel.ERROR)
+                LiveDebugLogger.log(errorMsg, LiveDebugLogger.LogLevel.ERROR)
                 listener?.onError(errorMsg)
             }
         })
@@ -153,7 +157,8 @@ class GeminiLiveClient(
         val fullMessage = mapOf("setup" to setupPayload)
         val json = mapAdapter.toJson(fullMessage)
         Log.d(tag, "Sending setup message: $json")
-        LiveDebugLogger.log("Setup message sent: $modelName (Voice: $voiceName)", LiveDebugLogger.LogLevel.INFO)
+        LiveDebugLogger.log("Setup message sent for $modelName (Voice: $voiceName)", LiveDebugLogger.LogLevel.INFO)
+        LiveDebugLogger.log("Setup JSON payload:\n$json", LiveDebugLogger.LogLevel.DATA)
         
         // Start 12s setup watchdog to detect unavailable/denied models
         setupTimeoutJob?.cancel()
@@ -161,8 +166,8 @@ class GeminiLiveClient(
             delay(12_000L)
             if (!isSetupDone && isConnected) {
                 Log.e(tag, "Setup timeout: setupComplete not received within 12s")
-                val errorMsg = "Model access denied or unavailable — check API key permissions"
-                LiveDebugLogger.log("Setup error: $errorMsg", LiveDebugLogger.LogLevel.ERROR)
+                val errorMsg = "Setup timeout (12s): No setupComplete received from server"
+                LiveDebugLogger.log(errorMsg, LiveDebugLogger.LogLevel.ERROR)
                 listener?.onError(errorMsg)
                 disconnect()
             }
@@ -239,8 +244,8 @@ class GeminiLiveClient(
                 setupTimeoutJob = null
                 val errorObj = root["error"] as? Map<*, *>
                 val msg = errorObj?.get("message") as? String ?: "Unknown Live API error"
-                Log.e(tag, "Gemini Live returned error: $msg")
-                LiveDebugLogger.log("Error from server: $msg", LiveDebugLogger.LogLevel.ERROR)
+                Log.e(tag, "Gemini Live returned error: $msg ($jsonText)")
+                LiveDebugLogger.log("Error from server payload: $jsonText", LiveDebugLogger.LogLevel.ERROR)
                 listener?.onError(msg)
                 return
             }
