@@ -9,6 +9,7 @@ import androidx.room.Room
 import com.example.data.database.AppDatabase
 import com.example.data.database.entity.*
 import com.example.conversation.ConversationManager
+import com.example.debug.LiveDebugLogger
 import com.example.english.EnglishEngine
 import com.example.providers.GeminiProvider
 import com.example.providers.InworldLiveClient
@@ -110,7 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val liveErrorMessage: StateFlow<String?> = conversationManager.liveErrorMessage
     val requestAudioPermissionEvent = MutableStateFlow(false)
 
-    private val _isCameraOn = MutableStateFlow(true)
+    private val _isCameraOn = MutableStateFlow(false)
     val isCameraOn: StateFlow<Boolean> = _isCameraOn.asStateFlow()
 
     // Safety and grammar trigger states
@@ -400,7 +401,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val settings = Settings(
                 userId = userId,
                 selectedPersonality = onboardingPersonality.value,
-                cameraEnabled = true,
+                cameraEnabled = false,
                 voiceEmotionEnabled = true,
                 faceEmotionEnabled = true,
                 englishCorrectionEnabled = true,
@@ -434,6 +435,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!geminiProvider.isKeyConfigured()) {
             openApiKeyDialog()
         }
+        _isCameraOn.value = false
         viewModelScope.launch {
             val personality = appSettings.value?.selectedPersonality ?: "Friendly"
             conversationManager.startSession("user_default", personality)
@@ -443,6 +445,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun handleEndSession() {
         _voiceState.value = "IDLE"
+        _isCameraOn.value = false
         conversationManager.stopLiveVoiceSession()
         viewModelScope.launch {
             conversationManager.endSession()
@@ -486,6 +489,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             conversationManager.startLiveVoiceSession(
                 userId = "user_default",
                 personality = personality,
+                isCameraModeEnabled = _isCameraOn.value,
                 onVoiceStateChanged = { newState ->
                     _voiceState.value = newState
                 },
@@ -609,6 +613,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleCamera() {
         _isCameraOn.value = !_isCameraOn.value
+        val isNowOn = _isCameraOn.value
+        LiveDebugLogger.log(
+            if (isNowOn) "Camera Mode ENABLED: Face & expression analysis active" else "Camera Mode DISABLED: Voice-only mode active",
+            LiveDebugLogger.LogLevel.INFO
+        )
     }
 
     fun resetCompanionHistory() {

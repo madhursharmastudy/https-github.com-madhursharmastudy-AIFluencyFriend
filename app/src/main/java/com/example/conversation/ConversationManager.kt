@@ -181,6 +181,7 @@ class ConversationManager(
     suspend fun startLiveVoiceSession(
         userId: String,
         personality: String,
+        isCameraModeEnabled: Boolean = false,
         onVoiceStateChanged: (String) -> Unit,
         onError: (String) -> Unit
     ) = withContext(Dispatchers.IO) {
@@ -203,7 +204,8 @@ class ConversationManager(
             relationshipLevel = 5,
             goals = listOf("Improve speaking fluency", "Gain conversational confidence"),
             memories = memoryStrings,
-            isEnglishCorrectionEnabled = true
+            isEnglishCorrectionEnabled = true,
+            isCameraModeEnabled = isCameraModeEnabled
         )
 
         // 2. Initialize AudioTrack player

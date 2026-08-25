@@ -10,7 +10,8 @@ class ContextBuilder {
         relationshipLevel: Int,
         goals: List<String>,
         memories: List<String>,
-        isEnglishCorrectionEnabled: Boolean
+        isEnglishCorrectionEnabled: Boolean,
+        isCameraModeEnabled: Boolean = false
     ): String {
         val baseRole = """
             You are AI Fluency Friend, an emotionally intelligent, affectionate, and highly engaging AI companion.
@@ -97,6 +98,21 @@ class ContextBuilder {
             ""
         }
 
+        val visualModePrompt = if (isCameraModeEnabled) {
+            """
+            CAMERA & VISION STATUS: CAMERA MODE ACTIVE
+            - The user has explicitly enabled camera mode for facial and expression detection.
+            - You may naturally acknowledge their smile, facial expressions, and visual engagement when appropriate.
+            """.trimIndent()
+        } else {
+            """
+            CAMERA & VISION STATUS: VOICE-ONLY MODE (CAMERA IS OFF)
+            - You are running in voice-only conversation mode. There is NO camera or visual feed active.
+            - You CANNOT see the user, their face, expressions, clothing, room, or physical surroundings.
+            - Under NO circumstances describe, guess, or mention what the user looks like, what you "see", or their physical visual appearance. Rely strictly and solely on their spoken voice, tone, and spoken words.
+            """.trimIndent()
+        }
+
         return """
             $baseRole
             
@@ -105,6 +121,8 @@ class ContextBuilder {
             $relationshipPrompt
             
             $emotionalContext
+
+            $visualModePrompt
             
             $memoryPrompt
             

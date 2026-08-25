@@ -15,7 +15,8 @@ import java.util.concurrent.TimeUnit
  */
 class InworldLiveClient(
     private val apiKey: String,
-    private val voice: String = "alloy"
+    private val voice: String = "alloy",
+    private val model: String = "openai/gpt-4o-mini"
 ) {
     private val tag = "InworldLiveClient"
     private val clientScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -133,21 +134,26 @@ class InworldLiveClient(
 
     private fun sendSessionUpdate(systemInstructionText: String) {
         val sessionConfig = mutableMapOf<String, Any>(
-            "modalities" to listOf("audio", "text"),
-            "voice" to voice,
-            "input_audio_format" to "pcm16",
-            "output_audio_format" to "pcm16",
-            "turn_detection" to mapOf(
-                "type" to "server_vad",
-                "threshold" to 0.5,
-                "prefix_padding_ms" to 300,
-                "silence_duration_ms" to 500
+            "type" to "realtime",
+            "instructions" to systemInstructionText,
+            "model" to model,
+            "audio" to mapOf(
+                "input" to mapOf(
+                    "transcription" to mapOf(
+                        "model" to "inworld/inworld-stt-1"
+                    ),
+                    "turn_detection" to mapOf(
+                        "type" to "semantic_vad",
+                        "eagerness" to "medium",
+                        "interrupt_response" to true
+                    )
+                ),
+                "output" to mapOf(
+                    "voice" to voice,
+                    "model" to "inworld-tts-2"
+                )
             )
         )
-
-        if (systemInstructionText.isNotBlank()) {
-            sessionConfig["instructions"] = systemInstructionText
-        }
 
         val updateMessage = mapOf(
             "type" to "session.update",
@@ -156,7 +162,7 @@ class InworldLiveClient(
 
         val json = mapAdapter.toJson(updateMessage)
         Log.d(tag, "Sending Inworld session.update: $json")
-        LiveDebugLogger.log("Session configuration sent to Inworld AI (Voice: $voice)", LiveDebugLogger.LogLevel.INFO)
+        LiveDebugLogger.log("Session configuration sent to Inworld AI (Voice: $voice, Model: $model)", LiveDebugLogger.LogLevel.INFO)
         LiveDebugLogger.log("Inworld setup payload:\n$json", LiveDebugLogger.LogLevel.DATA)
 
         // Start 12s setup watchdog to catch timeouts
@@ -232,7 +238,7 @@ class InworldLiveClient(
                     listener?.onSetupComplete()
                 }
 
-                "response.audio.delta", "response.output_audio.delta" -> {
+                "response.output_audio.delta", "response.audio.delta" -> {
                     val base64Delta = root["delta"] as? String ?: root["audio"] as? String
                     if (!base64Delta.isNullOrEmpty()) {
                         val audioBytes = Base64.decode(base64Delta, Base64.NO_WRAP)
@@ -244,8 +250,8 @@ class InworldLiveClient(
                     }
                 }
 
-                "response.audio_transcript.delta", "response.text.delta" -> {
-                    val deltaText = root["delta"] as? String ?: root["text"] as? String
+                "response.output_audio_transcript.delta", "response.audio_transcript.delta", "response.text.delta" -> {
+                    val deltaText = root["delta"] as? String ?: root["text"] as? String ?: root["transcript"] as? String
                     if (!deltaText.isNullOrEmpty()) {
                         LiveDebugLogger.log("Inworld transcript: \"$deltaText\"", LiveDebugLogger.LogLevel.INFO)
                         listener?.onTranscriptChunkReceived(deltaText)
@@ -254,13 +260,18 @@ class InworldLiveClient(
 
                 "input_audio_buffer.speech_started" -> {
                     Log.d(tag, "Inworld VAD speech started (user interruption)")
-                    LiveDebugLogger.log("Model turn interrupted by user voice", LiveDebugLogger.LogLevel.WARN)
+                    LiveDebugLogger.log("Model turn interrupted by user voice (VAD speech started)", LiveDebugLogger.LogLevel.WARN)
                     listener?.onInterrupted()
+                }
+
+                "input_audio_buffer.speech_stopped" -> {
+                    Log.d(tag, "Inworld VAD speech stopped")
+                    LiveDebugLogger.log("User voice input ended (VAD speech stopped)", LiveDebugLogger.LogLevel.INFO)
                 }
 
                 "response.done", "response.output_item.done" -> {
                     Log.d(tag, "Inworld turn completed: $type")
-                    LiveDebugLogger.log("Inworld turn complete received", LiveDebugLogger.LogLevel.SUCCESS)
+                    LiveDebugLogger.log("Inworld turn complete ($type)", LiveDebugLogger.LogLevel.SUCCESS)
                     listener?.onTurnComplete()
                 }
 

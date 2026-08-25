@@ -1284,6 +1284,7 @@ fun ChatScreen(viewModel: MainViewModel) {
 
     val safetyNote by viewModel.safetyNotification.collectAsState()
     val correctionNote by viewModel.lastInvisibleCorrection.collectAsState()
+    val isCameraOn by viewModel.isCameraOn.collectAsState()
 
     // Debug logs state
     val debugLogs by LiveDebugLogger.logs.collectAsState()
@@ -1389,7 +1390,79 @@ fun ChatScreen(viewModel: MainViewModel) {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Dedicated Camera Mode Button / Toggle (Off by default for voice sessions)
+                Card(
+                    onClick = { viewModel.toggleCamera() },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isCameraOn) Color(0xFF1B382B).copy(alpha = 0.9f) else Color.White.copy(alpha = 0.08f)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isCameraOn) Color(0xFF4CAF50).copy(alpha = 0.7f) else Color.White.copy(alpha = 0.18f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .background(
+                                        if (isCameraOn) Color(0xFF4CAF50).copy(alpha = 0.25f) else Color.White.copy(alpha = 0.1f),
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isCameraOn) Icons.Default.Videocam else Icons.Default.VideocamOff,
+                                    contentDescription = if (isCameraOn) "Camera Mode Active" else "Camera Mode Off",
+                                    tint = if (isCameraOn) Color(0xFF81C784) else Color.White.copy(alpha = 0.75f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = if (isCameraOn) "Camera Mode: ACTIVE" else "Camera Mode: OFF",
+                                    color = if (isCameraOn) Color(0xFF81C784) else Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isCameraOn) "Analyzing facial emotion cues" else "Voice-only (No video/visual feed sent)",
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (isCameraOn) Color(0xFFB00020).copy(alpha = 0.35f) else Color.White.copy(alpha = 0.15f),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (isCameraOn) "Turn Off" else "Enable",
+                                color = if (isCameraOn) Color(0xFFFFCDD2) else Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Error and status notifications
                 if (liveError != null) {
