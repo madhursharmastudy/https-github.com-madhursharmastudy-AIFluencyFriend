@@ -140,7 +140,8 @@ class InworldLiveClient(
             "audio" to mapOf(
                 "input" to mapOf(
                     "transcription" to mapOf(
-                        "model" to "inworld/inworld-stt-1"
+                        "model" to "inworld/inworld-stt-1",
+                        "language" to "en"
                     ),
                     "turn_detection" to mapOf(
                         "type" to "semantic_vad",

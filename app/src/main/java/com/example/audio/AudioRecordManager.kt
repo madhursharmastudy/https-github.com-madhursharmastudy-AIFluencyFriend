@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.debug.LiveDebugLogger
@@ -15,7 +17,8 @@ import kotlin.math.sqrt
 
 /**
  * Manages real-time microphone capture on Android.
- * Captures 16kHz, 16-bit PCM mono audio required by the Gemini Live API.
+ * Captures 16kHz, 16-bit PCM mono audio using VOICE_COMMUNICATION source with
+ * AcousticEchoCanceler and NoiseSuppressor for feedback-free conversation.
  */
 class AudioRecordManager(private val context: Context) {
 
@@ -29,6 +32,8 @@ class AudioRecordManager(private val context: Context) {
     }
 
     private var audioRecord: AudioRecord? = null
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
     private var recordingJob: Job? = null
     private var isRecording = false
 
@@ -74,7 +79,7 @@ class AudioRecordManager(private val context: Context) {
 
         try {
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT,
@@ -90,10 +95,44 @@ class AudioRecordManager(private val context: Context) {
                 return
             }
 
+            // Explicitly enable hardware / platform Acoustic Echo Canceler and Noise Suppressor
+            val sessionId = audioRecord?.audioSessionId ?: 0
+            if (sessionId != 0) {
+                if (AcousticEchoCanceler.isAvailable()) {
+                    try {
+                        echoCanceler = AcousticEchoCanceler.create(sessionId)?.apply {
+                            enabled = true
+                        }
+                        LiveDebugLogger.log("AcousticEchoCanceler enabled on audio session $sessionId", LiveDebugLogger.LogLevel.INFO)
+                        Log.i(tag, "AcousticEchoCanceler enabled: ${echoCanceler?.enabled}")
+                    } catch (e: Exception) {
+                        Log.w(tag, "Failed to create/enable AcousticEchoCanceler", e)
+                        LiveDebugLogger.log("AEC warning: ${e.localizedMessage}", LiveDebugLogger.LogLevel.WARN)
+                    }
+                } else {
+                    LiveDebugLogger.log("Hardware AcousticEchoCanceler is not supported on this device", LiveDebugLogger.LogLevel.WARN)
+                }
+
+                if (NoiseSuppressor.isAvailable()) {
+                    try {
+                        noiseSuppressor = NoiseSuppressor.create(sessionId)?.apply {
+                            enabled = true
+                        }
+                        LiveDebugLogger.log("NoiseSuppressor enabled on audio session $sessionId", LiveDebugLogger.LogLevel.INFO)
+                        Log.i(tag, "NoiseSuppressor enabled: ${noiseSuppressor?.enabled}")
+                    } catch (e: Exception) {
+                        Log.w(tag, "Failed to create/enable NoiseSuppressor", e)
+                        LiveDebugLogger.log("NoiseSuppressor warning: ${e.localizedMessage}", LiveDebugLogger.LogLevel.WARN)
+                    }
+                } else {
+                    LiveDebugLogger.log("Hardware NoiseSuppressor is not supported on this device", LiveDebugLogger.LogLevel.WARN)
+                }
+            }
+
             audioRecord?.startRecording()
             isRecording = true
-            Log.i(tag, "AudioRecord started: 16kHz 16-bit Mono")
-            LiveDebugLogger.log("Microphone recording started (16kHz 16-bit Mono PCM)", LiveDebugLogger.LogLevel.INFO)
+            Log.i(tag, "AudioRecord started: VOICE_COMMUNICATION, 16kHz 16-bit Mono")
+            LiveDebugLogger.log("Microphone recording started (VOICE_COMMUNICATION, 16kHz Mono, Echo Cancellation active)", LiveDebugLogger.LogLevel.INFO)
 
             recordingJob = scope.launch(Dispatchers.IO) {
                 val audioBuffer = ByteArray(CHUNK_SIZE_BYTES)
@@ -149,6 +188,22 @@ class AudioRecordManager(private val context: Context) {
         isRecording = false
         recordingJob?.cancel()
         recordingJob = null
+
+        try {
+            echoCanceler?.release()
+        } catch (e: Exception) {
+            Log.e(tag, "Error releasing AcousticEchoCanceler", e)
+        } finally {
+            echoCanceler = null
+        }
+
+        try {
+            noiseSuppressor?.release()
+        } catch (e: Exception) {
+            Log.e(tag, "Error releasing NoiseSuppressor", e)
+        } finally {
+            noiseSuppressor = null
+        }
 
         try {
             audioRecord?.let {
