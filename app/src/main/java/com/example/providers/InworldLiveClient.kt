@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
  */
 class InworldLiveClient(
     private val apiKey: String,
-    private val voice: String = "alloy",
+    private val voice: String = "Sarah",
     private val model: String = "openai/gpt-4o-mini"
 ) {
     private val tag = "InworldLiveClient"

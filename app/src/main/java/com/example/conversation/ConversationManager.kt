@@ -242,7 +242,7 @@ class ConversationManager(
 
             val inworldClient = InworldLiveClient(
                 apiKey = inworldApiKey,
-                voice = "alloy"
+                voice = "Sarah"
             )
 
             inworldClient.listener = object : InworldLiveClient.LiveEventListener {
