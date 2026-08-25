@@ -239,6 +239,44 @@ class InworldLiveClient(
                     listener?.onSetupComplete()
                 }
 
+                "conversation.item.input_audio_transcription.completed",
+                "input_audio_transcription.completed" -> {
+                    val userTranscript = root["transcript"] as? String
+                        ?: root["text"] as? String
+                        ?: root["delta"] as? String
+                        ?: ""
+                    if (userTranscript.isNotBlank()) {
+                        Log.i(tag, "User speech transcribed: $userTranscript")
+                        LiveDebugLogger.log("[USER SAID]: $userTranscript", LiveDebugLogger.LogLevel.SUCCESS)
+                    }
+                }
+
+                "conversation.item.input_audio_transcription.delta",
+                "input_audio_transcription.delta" -> {
+                    val delta = root["delta"] as? String ?: root["transcript"] as? String ?: ""
+                    if (delta.isNotBlank()) {
+                        Log.v(tag, "User speech transcript delta: $delta")
+                        LiveDebugLogger.log("[USER SAID (delta)]: $delta", LiveDebugLogger.LogLevel.DATA)
+                    }
+                }
+
+                "conversation.item.created" -> {
+                    val item = root["item"] as? Map<*, *>
+                    val role = item?.get("role") as? String
+                    if (role == "user") {
+                        val contentList = item["content"] as? List<*>
+                        contentList?.forEach { contentItem ->
+                            if (contentItem is Map<*, *>) {
+                                val transcript = contentItem["transcript"] as? String ?: contentItem["text"] as? String
+                                if (!transcript.isNullOrBlank()) {
+                                    Log.i(tag, "User speech item created: $transcript")
+                                    LiveDebugLogger.log("[USER SAID]: $transcript", LiveDebugLogger.LogLevel.SUCCESS)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 "response.output_audio.delta", "response.audio.delta" -> {
                     val base64Delta = root["delta"] as? String ?: root["audio"] as? String
                     if (!base64Delta.isNullOrEmpty()) {
