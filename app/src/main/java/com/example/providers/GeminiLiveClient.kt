@@ -27,6 +27,8 @@ class GeminiLiveClient(
         fun onSetupComplete()
         fun onAudioChunkReceived(audioData: ByteArray)
         fun onTranscriptChunkReceived(text: String)
+        fun onUserTranscriptDelta(delta: String) {}
+        fun onUserTranscriptCompleted(fullTranscript: String) {}
         fun onTurnComplete()
         fun onInterrupted()
         fun onError(error: String)

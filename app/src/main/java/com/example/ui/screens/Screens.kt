@@ -1281,6 +1281,9 @@ fun ChatScreen(viewModel: MainViewModel) {
     val voiceState by viewModel.voiceState.collectAsState()
     val liveAudioLevel by viewModel.liveAudioLevel.collectAsState()
     val liveError by viewModel.liveErrorMessage.collectAsState()
+    val liveCaptions by viewModel.liveCaptions.collectAsState()
+    val isCaptionsOverlayVisible by viewModel.isCaptionsOverlayVisible.collectAsState()
+    val isAecNsEnabled by viewModel.isAecNsEnabled.collectAsState()
 
     val safetyNote by viewModel.safetyNotification.collectAsState()
     val correctionNote by viewModel.lastInvisibleCorrection.collectAsState()
@@ -1292,11 +1295,19 @@ fun ChatScreen(viewModel: MainViewModel) {
     var isDebugPanelOpen by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
     val debugListState = rememberLazyListState()
+    val captionsListState = rememberLazyListState()
 
     // Auto-scroll debug logs to the bottom when new logs arrive
     LaunchedEffect(debugLogs.size) {
         if (debugLogs.isNotEmpty()) {
             debugListState.animateScrollToItem(debugLogs.size - 1)
+        }
+    }
+
+    // Auto-scroll live captions to the latest entry/delta
+    LaunchedEffect(liveCaptions.size, liveCaptions.lastOrNull()?.text) {
+        if (liveCaptions.isNotEmpty()) {
+            captionsListState.animateScrollToItem(liveCaptions.size - 1)
         }
     }
 
@@ -1327,11 +1338,11 @@ fun ChatScreen(viewModel: MainViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Top Section: Empathy Pill, Debug Toggle & Modern Warnings
+            // 1. Top Section: Empathy Pill, Captions Toggle, Debug Toggle & Warnings
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
@@ -1344,7 +1355,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                     Box(
                         modifier = Modifier
                             .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
-                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
@@ -1355,42 +1366,71 @@ fun ChatScreen(viewModel: MainViewModel) {
                                         CircleShape
                                     )
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Empathy Sync: ${activeEmotion.emotion} (${activeEmotion.confidence}%)",
+                                text = "Sync: ${activeEmotion.emotion} (${activeEmotion.confidence}%)",
                                 color = Color.White,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
 
-                    // Debug Log Toggle Button
-                    Button(
-                        onClick = { isDebugPanelOpen = !isDebugPanelOpen },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isDebugPanelOpen) Color(0xFF6750A4) else Color.White.copy(alpha = 0.15f),
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(34.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.BugReport,
-                            contentDescription = "Toggle Debug Log",
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (isDebugPanelOpen) "Hide Logs" else "Debug Log",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        // Dedicated Live Captions Overlay Toggle (Default: ON)
+                        Button(
+                            onClick = { viewModel.toggleCaptionsOverlay() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isCaptionsOverlayVisible) Color(0xFF6750A4) else Color.White.copy(alpha = 0.15f),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isCaptionsOverlayVisible) Icons.Default.Subtitles else Icons.Default.SubtitlesOff,
+                                contentDescription = "Toggle Captions Overlay",
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isCaptionsOverlayVisible) "Captions ON" else "Captions OFF",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // Debug Log Toggle Button
+                        Button(
+                            onClick = { isDebugPanelOpen = !isDebugPanelOpen },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isDebugPanelOpen) Color(0xFF6750A4) else Color.White.copy(alpha = 0.15f),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BugReport,
+                                contentDescription = "Toggle Debug Log",
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isDebugPanelOpen) "Logs" else "Debug",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Dedicated Camera Mode Button / Toggle (Off by default for voice sessions)
                 Card(
@@ -1469,7 +1509,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFBA1A1A).copy(alpha = 0.9f)),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
@@ -1494,7 +1534,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF881111).copy(alpha = 0.85f)),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                     ) {
                         Text(
                             text = safetyNote!!,
@@ -1508,7 +1548,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF116611).copy(alpha = 0.85f)),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                     ) {
                         Text(
                             text = correctionNote!!,
@@ -1521,10 +1561,12 @@ fun ChatScreen(viewModel: MainViewModel) {
                 }
             }
 
-            // 2. Center Section: Status, Dynamic Orb Visuals & Subtitles
+            // 2. Center Section: Dynamic Pulsing Orb & Transparent Real-Time Captions Overlay
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
             ) {
                 Text(
                     text = when {
@@ -1534,27 +1576,27 @@ fun ChatScreen(viewModel: MainViewModel) {
                         voiceState == "SPEAKING" -> "Speaking..."
                         else -> "Ready to Talk"
                     },
-                    fontSize = 28.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(6.dp))
-                val currentProviderLabel = if (settings?.voiceProvider.equals("Inworld", true)) "Inworld AI" else "Gemini Live"
+                Spacer(modifier = Modifier.height(4.dp))
+                val currentProviderLabel = if (settings?.voiceProvider.equals("Inworld", true)) "Inworld AI (Sarah)" else "Gemini Live"
                 Text(
                     text = "Aria • ${settings?.selectedPersonality ?: "Friendly"} • $currentProviderLabel",
-                    fontSize = 14.sp,
+                    fontSize = 12.sp,
                     color = Color.White.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(40.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Dynamic Audio Scale & Pulsing Orbs
                 val infiniteTransition = rememberInfiniteTransition(label = "pulse_trans")
                 val pulse1 by infiniteTransition.animateFloat(
                     initialValue = 1f,
-                    targetValue = 1.3f,
+                    targetValue = 1.25f,
                     animationSpec = infiniteRepeatable(
                         animation = tween(1200, easing = LinearEasing),
                         repeatMode = RepeatMode.Reverse
@@ -1563,7 +1605,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                 )
                 val pulse2 by infiniteTransition.animateFloat(
                     initialValue = 1f,
-                    targetValue = 1.6f,
+                    targetValue = 1.45f,
                     animationSpec = infiniteRepeatable(
                         animation = tween(1800, easing = LinearEasing),
                         repeatMode = RepeatMode.Reverse
@@ -1572,7 +1614,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                 )
                 val pulse3 by infiniteTransition.animateFloat(
                     initialValue = 1f,
-                    targetValue = 2.0f,
+                    targetValue = 1.7f,
                     animationSpec = infiniteRepeatable(
                         animation = tween(2400, easing = LinearEasing),
                         repeatMode = RepeatMode.Reverse
@@ -1583,7 +1625,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                 val audioBoost = (liveAudioLevel * 1.5f).coerceIn(0f, 0.8f)
 
                 Box(
-                    modifier = Modifier.size(200.dp),
+                    modifier = Modifier.size(130.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     // Outer aura 3
@@ -1605,7 +1647,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                     // Mid aura 2
                     Box(
                         modifier = Modifier
-                            .size(160.dp)
+                            .size(105.dp)
                             .scale((if (isMuted) 1.0f else if (voiceState == "LISTENING") (pulse2 + audioBoost) else if (voiceState == "SPEAKING") pulse3 else pulse1))
                             .background(
                                 color = when {
@@ -1621,7 +1663,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                     // Solid central orb
                     Box(
                         modifier = Modifier
-                            .size(120.dp)
+                            .size(80.dp)
                             .scale(1.0f + (audioBoost * 0.3f))
                             .background(
                                 brush = Brush.radialGradient(
@@ -1648,32 +1690,113 @@ fun ChatScreen(viewModel: MainViewModel) {
                             },
                             contentDescription = "Companion Presence State",
                             tint = Color.White,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(30.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(36.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Ambient speech transcription subtitle (accessible voice feedback)
-                val lastCompanionMessage = messages.lastOrNull { it.sender == "companion" }?.content
-                if (lastCompanionMessage != null && (voiceState == "SPEAKING" || voiceState == "THINKING")) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .padding(14.dp)
-                    ) {
-                        Text(
-                            text = lastCompanionMessage,
-                            color = Color.White.copy(alpha = 0.95f),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 20.sp,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                // LIVE CONVERSATION CAPTIONS OVERLAY (Transparent, Real-Time Stream, Auto-Scrolling)
+                AnimatedVisibility(
+                    visible = isCaptionsOverlayVisible,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    if (liveCaptions.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 50.dp, max = 150.dp)
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Live captions will appear here in real time as you speak...",
+                                color = Color.White.copy(alpha = 0.45f),
+                                fontSize = 12.sp,
+                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            state = captionsListState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 60.dp, max = 190.dp)
+                                .padding(horizontal = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(liveCaptions, key = { it.id }) { caption ->
+                                val isUser = caption.sender == "user"
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.88f)
+                                            .background(
+                                                color = if (isUser) Color(0xFF6750A4).copy(alpha = 0.50f) else Color(0xFF1E1A38).copy(alpha = 0.65f),
+                                                shape = RoundedCornerShape(
+                                                    topStart = 14.dp,
+                                                    topEnd = 14.dp,
+                                                    bottomStart = if (isUser) 14.dp else 2.dp,
+                                                    bottomEnd = if (isUser) 2.dp else 14.dp
+                                                )
+                                            )
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (isUser) Color(0xFFD0BCFF).copy(alpha = 0.5f) else Color(0xFF81D4FA).copy(alpha = 0.4f),
+                                                shape = RoundedCornerShape(
+                                                    topStart = 14.dp,
+                                                    topEnd = 14.dp,
+                                                    bottomStart = if (isUser) 14.dp else 2.dp,
+                                                    bottomEnd = if (isUser) 2.dp else 14.dp
+                                                )
+                                            )
+                                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    ) {
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(6.dp)
+                                                        .background(
+                                                            if (isUser) Color(0xFF80D8FF) else Color(0xFFD0BCFF),
+                                                            CircleShape
+                                                        )
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = if (isUser) "YOU" else "ARIA",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isUser) Color(0xFF80D8FF) else Color(0xFFEADDFF)
+                                                )
+                                                if (!caption.isFinal) {
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "• live",
+                                                        fontSize = 9.sp,
+                                                        color = Color.White.copy(alpha = 0.6f)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = caption.text,
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                lineHeight = 17.sp,
+                                                fontWeight = FontWeight.Normal
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1682,7 +1805,7 @@ fun ChatScreen(viewModel: MainViewModel) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp),
+                    .padding(bottom = 12.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1704,7 +1827,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                             }
                         },
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(68.dp)
                             .background(
                                 if (isMuted) Color(0xFF881111) else Color.White.copy(alpha = 0.15f),
                                 CircleShape
@@ -1714,10 +1837,10 @@ fun ChatScreen(viewModel: MainViewModel) {
                             imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
                             contentDescription = if (isMuted) "Unmute" else "Mute",
                             tint = Color.White,
-                            modifier = Modifier.size(30.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = if (isMuted) "Unmute" else "Mute",
                         color = Color.White.copy(alpha = 0.8f),
@@ -1736,17 +1859,17 @@ fun ChatScreen(viewModel: MainViewModel) {
                             viewModel.navigateTo("home")
                         },
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(68.dp)
                             .background(Color(0xFFBA1A1A), CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Disconnect",
                             tint = Color.White,
-                            modifier = Modifier.size(30.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "Disconnect",
                         color = Color.White.copy(alpha = 0.8f),
@@ -1770,7 +1893,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                 border = BorderStroke(1.dp, Color(0xFF6750A4).copy(alpha = 0.4f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.65f)
+                    .fillMaxHeight(0.70f)
             ) {
                 Column(
                     modifier = Modifier
@@ -1910,6 +2033,40 @@ fun ChatScreen(viewModel: MainViewModel) {
                                 )
                             }
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Hardware AEC / Noise Suppressor Debug Toggle
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Hardware AEC & Noise Suppressor",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (isAecNsEnabled) "Acoustic Echo Canceler ON (prevents AI self-talking loop)" else "AEC & NS OFF (Raw Mic Mode for testing)",
+                                color = if (isAecNsEnabled) Color(0xFF81C784) else Color(0xFFFFB74D),
+                                fontSize = 10.sp
+                            )
+                        }
+                        Switch(
+                            checked = isAecNsEnabled,
+                            onCheckedChange = { viewModel.toggleAecNs() },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color(0xFFD0BCFF),
+                                checkedTrackColor = Color(0xFF6750A4)
+                            )
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -2457,6 +2614,7 @@ fun InsightsScreen(viewModel: MainViewModel) {
 fun ProfileScreen(viewModel: MainViewModel) {
     val profile by viewModel.userProfile.collectAsState()
     val settings by viewModel.appSettings.collectAsState()
+    val isAecNsEnabled by viewModel.isAecNsEnabled.collectAsState()
     val context = LocalContext.current
 
     Column(
@@ -2752,6 +2910,41 @@ fun ProfileScreen(viewModel: MainViewModel) {
                     Switch(
                         checked = settings?.englishCorrectionEnabled ?: true,
                         onCheckedChange = { },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF6750A4))
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Hardware Audio Processing & Debug
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, Color(0xFFCAC4D0))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("AUDIO HARDWARE & DIAGNOSTICS", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF6750A4))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Hardware Echo Cancellation & NS", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            text = if (isAecNsEnabled) "Acoustic Echo Canceler (AEC) & Noise Suppressor enabled to eliminate speaker-to-mic feedback loops."
+                            else "AEC & NS disabled. Using raw microphone input for testing.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF49454F)
+                        )
+                    }
+                    Switch(
+                        checked = isAecNsEnabled,
+                        onCheckedChange = { viewModel.toggleAecNs() },
                         colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF6750A4))
                     )
                 }

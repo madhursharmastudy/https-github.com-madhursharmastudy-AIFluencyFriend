@@ -9,6 +9,7 @@ import androidx.room.Room
 import com.example.data.database.AppDatabase
 import com.example.data.database.entity.*
 import com.example.conversation.ConversationManager
+import com.example.conversation.LiveCaptionEntry
 import com.example.debug.LiveDebugLogger
 import com.example.english.EnglishEngine
 import com.example.providers.GeminiProvider
@@ -109,10 +110,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val liveAudioLevel: StateFlow<Float> = conversationManager.liveAudioLevel
     val liveErrorMessage: StateFlow<String?> = conversationManager.liveErrorMessage
+    val liveCaptions: StateFlow<List<LiveCaptionEntry>> = conversationManager.liveCaptions
     val requestAudioPermissionEvent = MutableStateFlow(false)
 
     private val _isCameraOn = MutableStateFlow(false)
     val isCameraOn: StateFlow<Boolean> = _isCameraOn.asStateFlow()
+
+    // Live Captions on-screen overlay visibility (Default: ON)
+    private val _isCaptionsOverlayVisible = MutableStateFlow(true)
+    val isCaptionsOverlayVisible: StateFlow<Boolean> = _isCaptionsOverlayVisible.asStateFlow()
+
+    // Audio Hardware Echo Cancellation & Noise Suppression debug toggle
+    private val _isAecNsEnabled = MutableStateFlow(true)
+    val isAecNsEnabled: StateFlow<Boolean> = _isAecNsEnabled.asStateFlow()
 
     // Safety and grammar trigger states
     private val _safetyNotification = MutableStateFlow<String?>(null)
@@ -125,11 +135,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isApiKeyConfigured: StateFlow<Boolean> = _isApiKeyConfigured.asStateFlow()
 
     init {
-        // Load initial API keys and voice provider from SharedPreferences if available
+        // Load initial API keys, voice provider, and AEC/NS toggle from SharedPreferences
         val savedKey = prefs.getString("gemini_api_key", "") ?: ""
         val savedModel = prefs.getString("gemini_model", "gemini-2.5-flash") ?: "gemini-2.5-flash"
         val savedInworldKey = prefs.getString("inworld_api_key", "") ?: ""
         val savedVoiceProvider = prefs.getString("voice_provider", "Gemini") ?: "Gemini"
+        val savedAecNs = prefs.getBoolean("aec_ns_enabled", true)
+
+        _isAecNsEnabled.value = savedAecNs
+        conversationManager.setAecNsEnabled(savedAecNs)
 
         if (savedKey.isNotEmpty()) {
             geminiProvider.customApiKey = savedKey
@@ -503,6 +517,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopRealVoiceSession() {
         _voiceState.value = "IDLE"
         conversationManager.stopLiveVoiceSession()
+    }
+
+    fun toggleCaptionsOverlay() {
+        _isCaptionsOverlayVisible.value = !_isCaptionsOverlayVisible.value
+    }
+
+    fun setCaptionsOverlayVisible(visible: Boolean) {
+        _isCaptionsOverlayVisible.value = visible
+    }
+
+    fun toggleAecNs() {
+        setAecNsEnabled(!_isAecNsEnabled.value)
+    }
+
+    fun setAecNsEnabled(enabled: Boolean) {
+        _isAecNsEnabled.value = enabled
+        conversationManager.setAecNsEnabled(enabled)
+        prefs.edit().putBoolean("aec_ns_enabled", enabled).apply()
+        LiveDebugLogger.log("AEC & Noise Suppression setting updated to: $enabled", LiveDebugLogger.LogLevel.INFO)
     }
 
     fun onAudioPermissionResult(granted: Boolean) {

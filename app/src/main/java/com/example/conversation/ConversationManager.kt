@@ -66,6 +66,9 @@ class ConversationManager(
     private val _liveErrorMessage = MutableStateFlow<String?>(null)
     val liveErrorMessage: StateFlow<String?> = _liveErrorMessage.asStateFlow()
 
+    private val _liveCaptions = MutableStateFlow<List<LiveCaptionEntry>>(emptyList())
+    val liveCaptions: StateFlow<List<LiveCaptionEntry>> = _liveCaptions.asStateFlow()
+
     private var activeGeminiClient: GeminiLiveClient? = null
     private var activeInworldClient: InworldLiveClient? = null
     private var sessionStartTime: Long = 0
@@ -289,11 +292,21 @@ class ConversationManager(
                     cancelResponseWatchdog()
                     currentModelTurnTranscript.append(text)
                     updateLiveCompanionTranscript(sessionId, currentModelTurnTranscript.toString())
+                    appendCompanionLiveTranscriptDelta(text)
+                }
+
+                override fun onUserTranscriptDelta(delta: String) {
+                    appendUserLiveTranscriptDelta(delta)
+                }
+
+                override fun onUserTranscriptCompleted(fullTranscript: String) {
+                    completeUserLiveTranscript(fullTranscript)
                 }
 
                 override fun onTurnComplete() {
                     Log.d(tag, "Inworld Companion turn complete")
                     cancelResponseWatchdog()
+                    finalizeCompanionLiveTranscript()
                     val fullTranscript = currentModelTurnTranscript.toString().trim()
                     if (fullTranscript.isNotEmpty()) {
                         commitCompletedCompanionMessage(sessionId, fullTranscript)
@@ -304,6 +317,7 @@ class ConversationManager(
                 override fun onInterrupted() {
                     Log.d(tag, "Inworld Companion speech interrupted by user voice")
                     cancelResponseWatchdog()
+                    finalizeCompanionLiveTranscript()
                     audioTrackPlayer.stopAndFlush()
                     currentModelTurnTranscript.clear()
                     onVoiceStateChanged("LISTENING")
@@ -389,11 +403,21 @@ class ConversationManager(
                     cancelResponseWatchdog()
                     currentModelTurnTranscript.append(text)
                     updateLiveCompanionTranscript(sessionId, currentModelTurnTranscript.toString())
+                    appendCompanionLiveTranscriptDelta(text)
+                }
+
+                override fun onUserTranscriptDelta(delta: String) {
+                    appendUserLiveTranscriptDelta(delta)
+                }
+
+                override fun onUserTranscriptCompleted(fullTranscript: String) {
+                    completeUserLiveTranscript(fullTranscript)
                 }
 
                 override fun onTurnComplete() {
                     Log.d(tag, "Companion turn complete")
                     cancelResponseWatchdog()
+                    finalizeCompanionLiveTranscript()
                     val fullTranscript = currentModelTurnTranscript.toString().trim()
                     if (fullTranscript.isNotEmpty()) {
                         commitCompletedCompanionMessage(sessionId, fullTranscript)
@@ -404,6 +428,7 @@ class ConversationManager(
                 override fun onInterrupted() {
                     Log.d(tag, "Companion speech interrupted by user voice")
                     cancelResponseWatchdog()
+                    finalizeCompanionLiveTranscript()
                     audioTrackPlayer.stopAndFlush()
                     currentModelTurnTranscript.clear()
                     onVoiceStateChanged("LISTENING")
@@ -466,6 +491,61 @@ class ConversationManager(
             val cleaned = _sessionMessages.value.filterNot { it.messageId == "live_current" } + finalMsg
             _sessionMessages.value = cleaned
         }
+    }
+
+    fun appendUserLiveTranscriptDelta(delta: String) {
+        if (delta.isBlank()) return
+        val currentList = _liveCaptions.value.toMutableList()
+        val lastIndex = currentList.indexOfLast { it.sender == "user" && !it.isFinal }
+        if (lastIndex >= 0) {
+            val updated = currentList[lastIndex].copy(text = currentList[lastIndex].text + delta)
+            currentList[lastIndex] = updated
+        } else {
+            currentList.add(LiveCaptionEntry(sender = "user", text = delta, isFinal = false))
+        }
+        _liveCaptions.value = currentList.takeLast(30)
+    }
+
+    fun completeUserLiveTranscript(fullText: String) {
+        if (fullText.isBlank()) return
+        val currentList = _liveCaptions.value.toMutableList()
+        val lastIndex = currentList.indexOfLast { it.sender == "user" && !it.isFinal }
+        if (lastIndex >= 0) {
+            currentList[lastIndex] = currentList[lastIndex].copy(text = fullText, isFinal = true)
+        } else {
+            currentList.add(LiveCaptionEntry(sender = "user", text = fullText, isFinal = true))
+        }
+        _liveCaptions.value = currentList.takeLast(30)
+    }
+
+    fun appendCompanionLiveTranscriptDelta(delta: String) {
+        if (delta.isEmpty()) return
+        val currentList = _liveCaptions.value.toMutableList()
+        val lastIndex = currentList.indexOfLast { it.sender == "companion" && !it.isFinal }
+        if (lastIndex >= 0) {
+            val updated = currentList[lastIndex].copy(text = currentList[lastIndex].text + delta)
+            currentList[lastIndex] = updated
+        } else {
+            currentList.add(LiveCaptionEntry(sender = "companion", text = delta, isFinal = false))
+        }
+        _liveCaptions.value = currentList.takeLast(30)
+    }
+
+    fun finalizeCompanionLiveTranscript() {
+        val currentList = _liveCaptions.value.toMutableList()
+        val lastIndex = currentList.indexOfLast { it.sender == "companion" && !it.isFinal }
+        if (lastIndex >= 0) {
+            currentList[lastIndex] = currentList[lastIndex].copy(isFinal = true)
+            _liveCaptions.value = currentList
+        }
+    }
+
+    fun clearLiveCaptions() {
+        _liveCaptions.value = emptyList()
+    }
+
+    fun setAecNsEnabled(enabled: Boolean) {
+        audioRecordManager.isAecNsEnabled = enabled
     }
 
     fun stopLiveVoiceSession() {

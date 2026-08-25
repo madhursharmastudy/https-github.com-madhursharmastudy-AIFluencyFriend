@@ -27,6 +27,8 @@ class InworldLiveClient(
         fun onSetupComplete()
         fun onAudioChunkReceived(audioData: ByteArray)
         fun onTranscriptChunkReceived(text: String)
+        fun onUserTranscriptDelta(delta: String) {}
+        fun onUserTranscriptCompleted(fullTranscript: String) {}
         fun onTurnComplete()
         fun onInterrupted()
         fun onError(error: String)
@@ -248,6 +250,7 @@ class InworldLiveClient(
                     if (userTranscript.isNotBlank()) {
                         Log.i(tag, "User speech transcribed: $userTranscript")
                         LiveDebugLogger.log("[USER SAID]: $userTranscript", LiveDebugLogger.LogLevel.SUCCESS)
+                        listener?.onUserTranscriptCompleted(userTranscript)
                     }
                 }
 
@@ -257,6 +260,7 @@ class InworldLiveClient(
                     if (delta.isNotBlank()) {
                         Log.v(tag, "User speech transcript delta: $delta")
                         LiveDebugLogger.log("[USER SAID (delta)]: $delta", LiveDebugLogger.LogLevel.DATA)
+                        listener?.onUserTranscriptDelta(delta)
                     }
                 }
 
@@ -271,6 +275,7 @@ class InworldLiveClient(
                                 if (!transcript.isNullOrBlank()) {
                                     Log.i(tag, "User speech item created: $transcript")
                                     LiveDebugLogger.log("[USER SAID]: $transcript", LiveDebugLogger.LogLevel.SUCCESS)
+                                    listener?.onUserTranscriptCompleted(transcript)
                                 }
                             }
                         }

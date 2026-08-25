@@ -37,6 +37,21 @@ class AudioRecordManager(private val context: Context) {
     private var recordingJob: Job? = null
     private var isRecording = false
 
+    /**
+     * Debug toggle to enable or disable hardware AcousticEchoCanceler and NoiseSuppressor.
+     */
+    var isAecNsEnabled: Boolean = true
+        set(value) {
+            field = value
+            try {
+                echoCanceler?.enabled = value
+                noiseSuppressor?.enabled = value
+                LiveDebugLogger.log("Hardware AEC & Noise Suppressor ${if (value) "ENABLED" else "DISABLED"}", LiveDebugLogger.LogLevel.INFO)
+            } catch (e: Exception) {
+                Log.w(tag, "Failed to toggle AEC/NS dynamically: ${e.localizedMessage}")
+            }
+        }
+
     fun hasPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             context,
@@ -95,9 +110,9 @@ class AudioRecordManager(private val context: Context) {
                 return
             }
 
-            // Explicitly enable hardware / platform Acoustic Echo Canceler and Noise Suppressor
+            // Explicitly enable hardware / platform Acoustic Echo Canceler and Noise Suppressor if enabled
             val sessionId = audioRecord?.audioSessionId ?: 0
-            if (sessionId != 0) {
+            if (sessionId != 0 && isAecNsEnabled) {
                 if (AcousticEchoCanceler.isAvailable()) {
                     try {
                         echoCanceler = AcousticEchoCanceler.create(sessionId)?.apply {
@@ -127,15 +142,18 @@ class AudioRecordManager(private val context: Context) {
                 } else {
                     LiveDebugLogger.log("Hardware NoiseSuppressor is not supported on this device", LiveDebugLogger.LogLevel.WARN)
                 }
+            } else if (!isAecNsEnabled) {
+                LiveDebugLogger.log("Hardware AEC & Noise Suppressor bypassed by debug setting", LiveDebugLogger.LogLevel.INFO)
             }
 
             audioRecord?.startRecording()
             isRecording = true
-            Log.i(tag, "AudioRecord started: VOICE_COMMUNICATION, 16kHz 16-bit Mono")
-            LiveDebugLogger.log("Microphone recording started (VOICE_COMMUNICATION, 16kHz Mono, Echo Cancellation active)", LiveDebugLogger.LogLevel.INFO)
+            Log.i(tag, "AudioRecord started: VOICE_COMMUNICATION, 16kHz 16-bit Mono (AEC/NS: $isAecNsEnabled)")
+            LiveDebugLogger.log("Microphone recording started (VOICE_COMMUNICATION, 16kHz Mono, AEC/NS: $isAecNsEnabled)", LiveDebugLogger.LogLevel.INFO)
 
             recordingJob = scope.launch(Dispatchers.IO) {
                 val audioBuffer = ByteArray(CHUNK_SIZE_BYTES)
+                var chunkCount = 0
 
                 while (isActive && isRecording) {
                     val readBytes = audioRecord?.read(audioBuffer, 0, audioBuffer.size) ?: -1
@@ -143,6 +161,11 @@ class AudioRecordManager(private val context: Context) {
                     if (readBytes > 0) {
                         // Calculate RMS Amplitude for volume/audio visualization
                         val rms = calculateRms(audioBuffer, readBytes)
+                        chunkCount++
+                        if (chunkCount % 20 == 0) {
+                            val rmsFormatted = String.format(java.util.Locale.US, "%.2f", rms)
+                            LiveDebugLogger.log("[MIC LEVEL] RMS: $rmsFormatted", LiveDebugLogger.LogLevel.DATA)
+                        }
                         val chunkCopy = audioBuffer.copyOf(readBytes)
                         onAudioChunk(chunkCopy, rms)
                     } else if (readBytes < 0) {
