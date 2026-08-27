@@ -679,7 +679,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val updated = currentSettings.copy(selectedPersonality = name)
                 database.settingsDao().insertSettings(updated)
             }
-            if (conversationManager.isLiveActive || _voiceState.value != "IDLE") {
+            val isVoiceActive = conversationManager.isLiveActive ||
+                    _voiceState.value != "IDLE" ||
+                    conversationManager.isSessionActive.value
+
+            if (isVoiceActive) {
                 conversationManager.switchPersonalityInLiveSession(
                     userId = "user_default",
                     newPersonality = name,

@@ -53,6 +53,7 @@ class InworldLiveClient(
 
     private var isConnected = false
     private var isSetupDone = false
+    private var isIntentionallyClosed = false
     private var sentAudioChunkCount = 0
     private var receivedAudioChunkCount = 0
 
@@ -66,6 +67,7 @@ class InworldLiveClient(
         }
 
         disconnect()
+        isIntentionallyClosed = false
         sentAudioChunkCount = 0
         receivedAudioChunkCount = 0
 
@@ -111,15 +113,21 @@ class InworldLiveClient(
                 LiveDebugLogger.setWsStatus("Disconnected")
                 val reasonText = if (reason.isBlank()) "<empty>" else reason
                 LiveDebugLogger.log("Inworld WebSocket closed: code=$code, reason='$reasonText'", LiveDebugLogger.LogLevel.WARN)
-                listener?.onDisconnected("code=$code, reason='$reasonText'")
+                if (!isIntentionallyClosed) {
+                    listener?.onDisconnected("code=$code, reason='$reasonText'")
+                }
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                Log.e(tag, "Inworld WebSocket failure: ${t.localizedMessage}", t)
                 setupTimeoutJob?.cancel()
                 isConnected = false
                 isSetupDone = false
                 LiveDebugLogger.setWsStatus("Disconnected")
+                if (isIntentionallyClosed) {
+                    Log.i(tag, "Ignoring expected closure exception during intentional disconnect: ${t.localizedMessage}")
+                    return
+                }
+                Log.e(tag, "Inworld WebSocket failure: ${t.localizedMessage}", t)
                 val respBody = if (response != null) {
                     try { response.body?.string() } catch (_: Exception) { null }
                 } else null
@@ -343,6 +351,8 @@ class InworldLiveClient(
     }
 
     fun disconnect() {
+        isIntentionallyClosed = true
+        listener = null
         try {
             setupTimeoutJob?.cancel()
             setupTimeoutJob = null

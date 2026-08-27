@@ -563,21 +563,35 @@ class ConversationManager(
         onError: (String) -> Unit
     ) = withContext(Dispatchers.IO) {
         LiveDebugLogger.log("Switching active voice personality to: $newPersonality", LiveDebugLogger.LogLevel.INFO)
-        if (isLiveStreamingActive) {
-            // Disconnect current socket client and reconnect with updated personality prompt
-            activeGeminiClient?.disconnect()
-            activeGeminiClient = null
-            activeInworldClient?.disconnect()
-            activeInworldClient = null
-            
-            startLiveVoiceSession(
-                userId = userId,
-                personality = newPersonality,
-                isCameraModeEnabled = isCameraModeEnabled,
-                onVoiceStateChanged = onVoiceStateChanged,
-                onError = onError
-            )
-        }
+        cancelResponseWatchdog()
+        isLiveStreamingActive = false
+        audioRecordManager.stopRecording()
+        audioTrackPlayer.stopAndFlush()
+        _liveAudioLevel.value = 0f
+        currentModelTurnTranscript.clear()
+
+        // Disconnect previous socket clients cleanly
+        val oldGemini = activeGeminiClient
+        activeGeminiClient = null
+        oldGemini?.listener = null
+        oldGemini?.disconnect()
+
+        val oldInworld = activeInworldClient
+        activeInworldClient = null
+        oldInworld?.listener = null
+        oldInworld?.disconnect()
+
+        // Safety delay to ensure previous network sockets and audio buffers settle
+        kotlinx.coroutines.delay(250)
+
+        // Start new live session with the updated personality
+        startLiveVoiceSession(
+            userId = userId,
+            personality = newPersonality,
+            isCameraModeEnabled = isCameraModeEnabled,
+            onVoiceStateChanged = onVoiceStateChanged,
+            onError = onError
+        )
     }
 
     fun stopLiveVoiceSession() {

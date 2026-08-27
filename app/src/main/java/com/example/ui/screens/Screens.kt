@@ -1350,8 +1350,10 @@ fun ChatScreen(viewModel: MainViewModel) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
@@ -1378,90 +1380,85 @@ fun ChatScreen(viewModel: MainViewModel) {
                         }
                     }
 
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    // Quick Mode / Personality Switcher Button
+                    Button(
+                        onClick = { isPersonalitySelectorOpen = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF6750A4),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .height(32.dp)
+                            .testTag("voice_mode_switcher_button")
                     ) {
-                        // Quick Mode / Personality Switcher Button
-                        Button(
-                            onClick = { isPersonalitySelectorOpen = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF6750A4),
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(16.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier
-                                .height(32.dp)
-                                .testTag("voice_mode_switcher_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Psychology,
-                                contentDescription = "Switch Personality Mode",
-                                modifier = Modifier.size(14.dp),
-                                tint = Color(0xFFEADDFF)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = settings?.selectedPersonality ?: "Friendly",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Icon(
-                                imageVector = Icons.Default.ArrowDropDown,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Psychology,
+                            contentDescription = "Switch Personality Mode",
+                            modifier = Modifier.size(14.dp),
+                            tint = Color(0xFFEADDFF)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = settings?.selectedPersonality ?: "Friendly",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
 
-                        // Dedicated Live Captions Overlay Toggle (Default: ON)
-                        Button(
-                            onClick = { viewModel.toggleCaptionsOverlay() },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isCaptionsOverlayVisible) Color(0xFF6750A4) else Color.White.copy(alpha = 0.15f),
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(16.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isCaptionsOverlayVisible) Icons.Default.Subtitles else Icons.Default.SubtitlesOff,
-                                contentDescription = "Toggle Captions Overlay",
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isCaptionsOverlayVisible) "Captions ON" else "Captions OFF",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                    // Dedicated Live Captions Overlay Toggle (Default: ON)
+                    Button(
+                        onClick = { viewModel.toggleCaptionsOverlay() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isCaptionsOverlayVisible) Color(0xFF6750A4) else Color.White.copy(alpha = 0.15f),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isCaptionsOverlayVisible) Icons.Default.Subtitles else Icons.Default.SubtitlesOff,
+                            contentDescription = "Toggle Captions Overlay",
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isCaptionsOverlayVisible) "Captions ON" else "Captions OFF",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
 
-                        // Debug Log Toggle Button
-                        Button(
-                            onClick = { isDebugPanelOpen = !isDebugPanelOpen },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isDebugPanelOpen) Color(0xFF6750A4) else Color.White.copy(alpha = 0.15f),
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(16.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.BugReport,
-                                contentDescription = "Toggle Debug Log",
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isDebugPanelOpen) "Logs" else "Debug",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                    // Debug Log Toggle Button
+                    Button(
+                        onClick = { isDebugPanelOpen = !isDebugPanelOpen },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isDebugPanelOpen) Color(0xFF6750A4) else Color.White.copy(alpha = 0.15f),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BugReport,
+                            contentDescription = "Toggle Debug Log",
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isDebugPanelOpen) "Logs" else "Debug",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
 
