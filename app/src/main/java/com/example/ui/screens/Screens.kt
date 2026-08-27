@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -1313,6 +1314,7 @@ fun ChatScreen(viewModel: MainViewModel) {
 
     // Manage mute state
     var isMuted by remember { mutableStateOf(false) }
+    var isPersonalitySelectorOpen by remember { mutableStateOf(false) }
 
     // Start real voice session on entering ChatScreen if idle
     LaunchedEffect(Unit) {
@@ -1355,7 +1357,7 @@ fun ChatScreen(viewModel: MainViewModel) {
                     Box(
                         modifier = Modifier
                             .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
@@ -1380,6 +1382,39 @@ fun ChatScreen(viewModel: MainViewModel) {
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Quick Mode / Personality Switcher Button
+                        Button(
+                            onClick = { isPersonalitySelectorOpen = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("voice_mode_switcher_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Psychology,
+                                contentDescription = "Switch Personality Mode",
+                                modifier = Modifier.size(14.dp),
+                                tint = Color(0xFFEADDFF)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = settings?.selectedPersonality ?: "Friendly",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+
                         // Dedicated Live Captions Overlay Toggle (Default: ON)
                         Button(
                             onClick = { viewModel.toggleCaptionsOverlay() },
@@ -1583,12 +1618,28 @@ fun ChatScreen(viewModel: MainViewModel) {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 val currentProviderLabel = if (settings?.voiceProvider.equals("Inworld", true)) "Inworld AI (Sarah)" else "Gemini Live"
-                Text(
-                    text = "Aria • ${settings?.selectedPersonality ?: "Friendly"} • $currentProviderLabel",
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.6f),
-                    textAlign = TextAlign.Center
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { isPersonalitySelectorOpen = true }
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .testTag("personality_subtitle_button")
+                ) {
+                    Text(
+                        text = "Aria • ${settings?.selectedPersonality ?: "Friendly"} • $currentProviderLabel",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.75f),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = "Switch Personality",
+                        tint = Color.White.copy(alpha = 0.65f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
@@ -2128,7 +2179,171 @@ fun ChatScreen(viewModel: MainViewModel) {
                 }
             }
         }
+
+        if (isPersonalitySelectorOpen) {
+            PersonalitySelectorDialog(
+                currentPersonality = settings?.selectedPersonality ?: "Friendly",
+                onSelectPersonality = { newPers: String ->
+                    viewModel.updateSelectedPersonality(newPers)
+                },
+                onDismiss = { isPersonalitySelectorOpen = false }
+            )
+        }
     }
+}
+
+data class PersonalityOptionItem(
+    val name: String,
+    val description: String,
+    val icon: ImageVector,
+    val accentColor: Color
+)
+
+@Composable
+fun PersonalitySelectorDialog(
+    currentPersonality: String,
+    onSelectPersonality: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val personalities = listOf(
+        PersonalityOptionItem("Friendly", "Warm, enthusiastic & encouraging", Icons.Default.Favorite, Color(0xFF4CAF50)),
+        PersonalityOptionItem("Flirty", "Charming compliments & sweet teasing", Icons.Default.FavoriteBorder, Color(0xFFE91E63)),
+        PersonalityOptionItem("Talkative", "Energetic dialogue & curious questions", Icons.Default.ChatBubble, Color(0xFF2196F3)),
+        PersonalityOptionItem("Witty", "Smart humor & clever banter", Icons.Default.AutoAwesome, Color(0xFFFF9800)),
+        PersonalityOptionItem("Lovable", "Deeply caring, warm & validating", Icons.Default.Person, Color(0xFF9C27B0)),
+        PersonalityOptionItem("Sarcastic", "Playful roasts & dry cheeky humor", Icons.Default.Face, Color(0xFF795548)),
+        PersonalityOptionItem("Naughty", "Mischievous spark & lively fun", Icons.Default.Star, Color(0xFFFF5722))
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Psychology,
+                    contentDescription = null,
+                    tint = Color(0xFF6750A4),
+                    modifier = Modifier.size(26.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Personality Mode",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = Color(0xFF1D1B20)
+                    )
+                    Text(
+                        text = "Switch companion tone & vibe instantly",
+                        fontSize = 11.sp,
+                        color = Color(0xFF79747E)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                personalities.forEach { option ->
+                    val isSelected = option.name.equals(currentPersonality, ignoreCase = true)
+                    Card(
+                        onClick = {
+                            onSelectPersonality(option.name)
+                            onDismiss()
+                        },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) Color(0xFF6750A4).copy(alpha = 0.12f) else Color(0xFFF7F2FA)
+                        ),
+                        border = BorderStroke(
+                            width = if (isSelected) 2.dp else 1.dp,
+                            color = if (isSelected) Color(0xFF6750A4) else Color(0xFFE7E0EC)
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("personality_option_${option.name.lowercase()}")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(
+                                        color = if (isSelected) Color(0xFF6750A4) else option.accentColor.copy(alpha = 0.15f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = option.icon,
+                                    contentDescription = null,
+                                    tint = if (isSelected) Color.White else option.accentColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = option.name,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = if (isSelected) Color(0xFF6750A4) else Color(0xFF1D1B20)
+                                    )
+                                    if (isSelected) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color(0xFF6750A4), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "ACTIVE",
+                                                color = Color.White,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(
+                                    text = option.description,
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF49454F)
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = Color(0xFF6750A4),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("dismiss_personality_dialog_button")
+            ) {
+                Text("Close", color = Color(0xFF6750A4), fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = Color.White,
+        shape = RoundedCornerShape(20.dp)
+    )
 }
 
 // ==========================================

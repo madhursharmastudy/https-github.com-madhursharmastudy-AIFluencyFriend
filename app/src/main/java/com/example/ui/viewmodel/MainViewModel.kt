@@ -679,6 +679,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val updated = currentSettings.copy(selectedPersonality = name)
                 database.settingsDao().insertSettings(updated)
             }
+            if (conversationManager.isLiveActive || _voiceState.value != "IDLE") {
+                conversationManager.switchPersonalityInLiveSession(
+                    userId = "user_default",
+                    newPersonality = name,
+                    isCameraModeEnabled = _isCameraOn.value,
+                    onVoiceStateChanged = { newState ->
+                        _voiceState.value = newState
+                    },
+                    onError = { err ->
+                        Log.e(tag, "Failed to switch personality in live voice session: $err")
+                    }
+                )
+            }
         }
     }
 

@@ -8,6 +8,7 @@ import com.example.audio.AudioTrackPlayer
 import com.example.data.database.AppDatabase
 import com.example.data.database.entity.Session
 import com.example.data.database.entity.SessionMessage
+import com.example.debug.LiveDebugLogger
 import com.example.emotion.EmotionFusionEngine
 import com.example.emotion.FaceEmotionAnalyzer
 import com.example.emotion.VoiceEmotionAnalyzer
@@ -76,6 +77,7 @@ class ConversationManager(
     private var sessionStartTime: Long = 0
     private var currentModelTurnTranscript = StringBuilder()
     private var isLiveStreamingActive = false
+    val isLiveActive: Boolean get() = isLiveStreamingActive
     private var responseWatchdogJob: Job? = null
 
     private fun startResponseWatchdog(onVoiceStateChanged: (String) -> Unit) {
@@ -551,6 +553,31 @@ class ConversationManager(
 
     fun setAecNsEnabled(enabled: Boolean) {
         audioRecordManager.isAecNsEnabled = enabled
+    }
+
+    suspend fun switchPersonalityInLiveSession(
+        userId: String,
+        newPersonality: String,
+        isCameraModeEnabled: Boolean = false,
+        onVoiceStateChanged: (String) -> Unit,
+        onError: (String) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        LiveDebugLogger.log("Switching active voice personality to: $newPersonality", LiveDebugLogger.LogLevel.INFO)
+        if (isLiveStreamingActive) {
+            // Disconnect current socket client and reconnect with updated personality prompt
+            activeGeminiClient?.disconnect()
+            activeGeminiClient = null
+            activeInworldClient?.disconnect()
+            activeInworldClient = null
+            
+            startLiveVoiceSession(
+                userId = userId,
+                personality = newPersonality,
+                isCameraModeEnabled = isCameraModeEnabled,
+                onVoiceStateChanged = onVoiceStateChanged,
+                onError = onError
+            )
+        }
     }
 
     fun stopLiveVoiceSession() {
