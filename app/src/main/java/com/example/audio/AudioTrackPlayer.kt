@@ -57,6 +57,7 @@ class AudioTrackPlayer(
                 .build()
 
             audioTrack?.play()
+            audioTrack?.setVolume(1.0f)
             isRunning.set(true)
 
             playbackJob = scope.launch(Dispatchers.IO) {

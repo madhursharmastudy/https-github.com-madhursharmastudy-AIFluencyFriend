@@ -3,6 +3,7 @@ package com.example.conversation
 import android.content.Context
 import android.util.Log
 import com.example.audio.AudioRecordManager
+import com.example.audio.AudioRouteManager
 import com.example.audio.AudioTrackPlayer
 import com.example.data.database.AppDatabase
 import com.example.data.database.entity.Session
@@ -46,6 +47,7 @@ class ConversationManager(
     // Real-time Audio Hardware Engines
     val audioRecordManager = AudioRecordManager(context)
     val audioTrackPlayer = AudioTrackPlayer(sampleRate = 24000)
+    val audioRouteManager = AudioRouteManager(context)
 
     // State parameters
     private val _currentSessionId = MutableStateFlow<String?>(null)
@@ -211,7 +213,8 @@ class ConversationManager(
             isCameraModeEnabled = isCameraModeEnabled
         )
 
-        // 2. Initialize AudioTrack player
+        // 2. Initialize AudioTrack player & speakerphone communication routing
+        audioRouteManager.activateSpeakerphoneCommunication()
         audioTrackPlayer.initialize(coroutineScope)
         audioTrackPlayer.onPlaybackStarted = {
             onVoiceStateChanged("SPEAKING")
@@ -239,6 +242,7 @@ class ConversationManager(
                 ?: prefs.getString("inworld_api_key", "") ?: ""
 
             if (inworldApiKey.isBlank()) {
+                audioRouteManager.resetToNormal()
                 onError("Inworld API Key is not configured. Please add your key in Settings.")
                 return@withContext
             }
@@ -349,6 +353,7 @@ class ConversationManager(
             val geminiProv = aiProvider as? GeminiProvider
             val apiKey = geminiProv?.getActiveApiKey() ?: ""
             if (apiKey.isBlank()) {
+                audioRouteManager.resetToNormal()
                 onError("Gemini API Key is not configured. Please add your key in Settings.")
                 return@withContext
             }
@@ -554,6 +559,7 @@ class ConversationManager(
         audioRecordManager.stopRecording()
         audioTrackPlayer.stopAndFlush()
         audioTrackPlayer.release()
+        audioRouteManager.resetToNormal()
         activeGeminiClient?.disconnect()
         activeGeminiClient = null
         activeInworldClient?.disconnect()
