@@ -65,14 +65,17 @@ class AudioRecordManager(private val context: Context) {
         onAudioChunk: (ByteArray, Float) -> Unit,
         onError: (String) -> Unit
     ) {
+        LiveDebugLogger.log("[MIC] startRecording() called", LiveDebugLogger.LogLevel.INFO)
+
         if (isRecording) {
             Log.d(tag, "AudioRecord already recording")
+            LiveDebugLogger.log("[MIC] Aborted: already recording", LiveDebugLogger.LogLevel.WARN)
             return
         }
 
         if (!hasPermission()) {
             val msg = "Microphone permission (RECORD_AUDIO) not granted."
-            LiveDebugLogger.log("Mic error: $msg", LiveDebugLogger.LogLevel.ERROR)
+            LiveDebugLogger.log("[MIC] Aborted: missing RECORD_AUDIO permission ($msg)", LiveDebugLogger.LogLevel.ERROR)
             onError(msg)
             return
         }
@@ -84,8 +87,8 @@ class AudioRecordManager(private val context: Context) {
         )
 
         if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
-            val msg = "AudioRecord hardware configuration not supported."
-            LiveDebugLogger.log("Mic error: $msg", LiveDebugLogger.LogLevel.ERROR)
+            val msg = "AudioRecord hardware configuration not supported (minBufferSize: $minBufferSize)."
+            LiveDebugLogger.log("[MIC] Aborted: $msg", LiveDebugLogger.LogLevel.ERROR)
             onError(msg)
             return
         }
@@ -102,16 +105,18 @@ class AudioRecordManager(private val context: Context) {
             )
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                val msg = "Failed to initialize microphone hardware."
-                LiveDebugLogger.log("Mic error: $msg", LiveDebugLogger.LogLevel.ERROR)
+                val msg = "Failed to initialize microphone hardware (state: ${audioRecord?.state})."
+                LiveDebugLogger.log("[MIC] Aborted: $msg", LiveDebugLogger.LogLevel.ERROR)
                 onError(msg)
                 audioRecord?.release()
                 audioRecord = null
                 return
             }
 
-            // Explicitly enable hardware / platform Acoustic Echo Canceler and Noise Suppressor if enabled
             val sessionId = audioRecord?.audioSessionId ?: 0
+            LiveDebugLogger.log("[MIC] AudioRecord initialized successfully, session ID: $sessionId", LiveDebugLogger.LogLevel.INFO)
+
+            // Explicitly enable hardware / platform Acoustic Echo Canceler and Noise Suppressor if enabled
             if (sessionId != 0 && isAecNsEnabled) {
                 if (AcousticEchoCanceler.isAvailable()) {
                     try {

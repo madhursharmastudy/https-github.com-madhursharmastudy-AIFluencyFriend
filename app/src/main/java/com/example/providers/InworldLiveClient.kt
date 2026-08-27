@@ -244,9 +244,14 @@ class InworldLiveClient(
                     Log.i(tag, "Inworld session established: $type")
                     setupTimeoutJob?.cancel()
                     setupTimeoutJob = null
+                    val wasAlreadySetup = isSetupDone
                     isSetupDone = true
                     LiveDebugLogger.log("Session confirmation ($type) received from Inworld AI", LiveDebugLogger.LogLevel.SUCCESS)
-                    listener?.onSetupComplete()
+                    if (!wasAlreadySetup) {
+                        listener?.onSetupComplete()
+                    } else {
+                        Log.d(tag, "Inworld session confirmation ($type) received again; onSetupComplete already dispatched")
+                    }
                 }
 
                 "conversation.item.input_audio_transcription.completed",
