@@ -66,7 +66,6 @@ class GeminiLiveClient(
             return
         }
 
-        disconnect()
         isIntentionallyClosed = false
         sentAudioChunkCount = 0
         receivedAudioChunkCount = 0
